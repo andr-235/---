@@ -44,9 +44,29 @@ const store = createStore({
   cases: [],
   selectedCaseId: null,
   selectedCase: null,
+  artifacts: [],
+  selectedArtifactId: null,
+  selectedArtifact: null,
+  notes: [],
+  artifactFilters: {
+    type: "all",
+    search: "",
+    sort: "capturedAt:desc",
+  },
+  caseFilters: {
+    search: "",
+    status: "all",
+    assignee: "",
+  },
+  caseSort: {
+    sortBy: "createdAt",
+    sortDir: "desc",
+  },
 });
 
 const elements = {
+  appRoot: document.querySelector(".app"),
+  sidebar: document.querySelector(".sidebar"),
   caseList: document.getElementById("caseList"),
   caseEmpty: document.getElementById("caseEmpty"),
   caseSummary: document.getElementById("caseSummary"),
@@ -54,6 +74,7 @@ const elements = {
   refreshCases: document.getElementById("refreshCases"),
   createCase: document.getElementById("createCase"),
   clearSelection: document.getElementById("clearSelection"),
+  toggleSidebar: document.getElementById("toggleSidebar"),
   quickNav: document.getElementById("quickNav"),
   browserView: document.getElementById("browserView"),
   browserStatus: document.getElementById("browserStatus"),
@@ -68,8 +89,31 @@ const elements = {
   tabs: Array.from(document.querySelectorAll(".tab")),
   views: {
     browser: document.getElementById("view-browser"),
+    cases: document.getElementById("view-cases"),
     case: document.getElementById("view-case"),
   },
+  // Список дел (новый экран)
+  caseForm: document.getElementById("caseForm"),
+  caseFormTitle: document.getElementById("caseFormTitle"),
+  caseFormDescription: document.getElementById("caseFormDescription"),
+  caseFormAssigned: document.getElementById("caseFormAssigned"),
+  caseFormStatus: document.getElementById("caseFormStatus"),
+  caseFormSubmit: document.getElementById("caseFormSubmit"),
+  caseFormReset: document.getElementById("caseFormReset"),
+  caseSearch: document.getElementById("caseSearch"),
+  caseStatusFilter: document.getElementById("caseStatusFilter"),
+  caseAssigneeFilter: document.getElementById("caseAssigneeFilter"),
+  caseTableBody: document.getElementById("caseTableBody"),
+  caseTableEmpty: document.getElementById("caseTableEmpty"),
+  // Артефакты
+  artifactTypeFilter: document.getElementById("artifactTypeFilter"),
+  artifactSearch: document.getElementById("artifactSearch"),
+  artifactSort: document.getElementById("artifactSort"),
+  artifactTableBody: document.getElementById("artifactTableBody"),
+  artifactTableEmpty: document.getElementById("artifactTableEmpty"),
+  artifactPreview: document.getElementById("artifactPreview"),
+  notePanel: document.getElementById("notePanel"),
+  noteBody: document.getElementById("noteBody"),
 };
 
 const navButtons = new Map();
@@ -91,24 +135,78 @@ function formatStatus(value) {
   return statusLabels[normalized] || "Неизвестно";
 }
 
+function formatBytes(value) {
+  if (!value || Number.isNaN(value)) return "—";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
 function setSelectedCaseId(caseId) {
   const normalizedId = Number.isInteger(caseId) && caseId > 0 ? caseId : null;
   const state = store.getState();
   if (!normalizedId) {
-    store.setState({ selectedCaseId: null, selectedCase: null });
+    store.setState({
+      selectedCaseId: null,
+      selectedCase: null,
+      artifacts: [],
+      selectedArtifactId: null,
+      selectedArtifact: null,
+      notes: [],
+    });
     return;
   }
   const foundCase =
     state.cases.find((item) => item.id === normalizedId) || null;
-  store.setState({ selectedCaseId: normalizedId, selectedCase: foundCase });
+  store.setState({
+    selectedCaseId: normalizedId,
+    selectedCase: foundCase,
+    selectedArtifactId: null,
+    selectedArtifact: null,
+    notes: [],
+  });
+  if (normalizedId) {
+    loadArtifacts(normalizedId);
+  }
 }
 
 function setSelectedCase(caseItem) {
   if (!caseItem) {
-    store.setState({ selectedCaseId: null, selectedCase: null });
+    store.setState({
+      selectedCaseId: null,
+      selectedCase: null,
+      artifacts: [],
+      selectedArtifactId: null,
+      selectedArtifact: null,
+      notes: [],
+    });
     return;
   }
-  store.setState({ selectedCaseId: caseItem.id, selectedCase: caseItem });
+  store.setState({
+    selectedCaseId: caseItem.id,
+    selectedCase: caseItem,
+    selectedArtifactId: null,
+    selectedArtifact: null,
+    notes: [],
+  });
+  if (caseItem && caseItem.id) {
+    loadArtifacts(caseItem.id);
+  }
+}
+
+function setSelectedArtifactId(artifactId) {
+  const id = Number(artifactId);
+  const state = store.getState();
+  const found = state.artifacts.find((item) => item.id === id) || null;
+  store.setState({
+    selectedArtifactId: found ? found.id : null,
+    selectedArtifact: found,
+  });
 }
 
 function renderCaseList(state) {
@@ -146,9 +244,111 @@ function renderCaseList(state) {
 
     button.addEventListener("click", () => {
       setSelectedCase(caseItem);
+      setActiveView("case");
     });
 
     elements.caseList.appendChild(button);
+  });
+}
+
+function applyCaseFiltersAndSort(state) {
+  const { cases, caseFilters, caseSort } = state;
+  const search = (caseFilters.search || "").trim().toLowerCase();
+  const status = (caseFilters.status || "all").toLowerCase();
+  const assignee = (caseFilters.assignee || "").trim().toLowerCase();
+
+  const filtered = cases.filter((item) => {
+    const matchSearch =
+      !search ||
+      String(item.id).includes(search) ||
+      (item.title || "").toLowerCase().includes(search);
+    const matchStatus = status === "all" || item.status === status;
+    const matchAssignee =
+      !assignee ||
+      (item.assignedTo || "").toLowerCase().includes(assignee);
+    return matchSearch && matchStatus && matchAssignee;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const { sortBy, sortDir } = caseSort;
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortBy === "title" || sortBy === "assignedTo" || sortBy === "status") {
+      const av = (a[sortBy] || "").toLowerCase();
+      const bv = (b[sortBy] || "").toLowerCase();
+      if (av === bv) return 0;
+      return av > bv ? dir : -dir;
+    }
+    if (sortBy === "id") {
+      return (a.id - b.id) * dir;
+    }
+    const av = a[sortBy] ? new Date(a[sortBy]).getTime() : 0;
+    const bv = b[sortBy] ? new Date(b[sortBy]).getTime() : 0;
+    return av === bv ? 0 : av > bv ? dir : -dir;
+  });
+
+  return sorted;
+}
+
+function renderCaseTable(state) {
+  const rows = applyCaseFiltersAndSort(state);
+  elements.caseTableBody.innerHTML = "";
+  if (!rows.length) {
+    elements.caseTableEmpty.hidden = false;
+    return;
+  }
+  elements.caseTableEmpty.hidden = true;
+  rows.forEach((item) => {
+    const tr = document.createElement("tr");
+
+    const idTd = document.createElement("td");
+    idTd.textContent = item.id;
+
+    const titleTd = document.createElement("td");
+    titleTd.textContent = item.title;
+
+    const statusTd = document.createElement("td");
+    const status = document.createElement("span");
+    status.className = "status-tag";
+    status.textContent = formatStatus(item.status);
+    statusTd.appendChild(status);
+
+    const createdTd = document.createElement("td");
+    createdTd.textContent = formatDate(item.createdAt);
+
+    const assignedTd = document.createElement("td");
+    assignedTd.textContent = item.assignedTo || "—";
+
+    const actionsTd = document.createElement("td");
+    actionsTd.className = "action-buttons";
+
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "tiny-btn";
+    viewBtn.textContent = "Открыть";
+    viewBtn.addEventListener("click", () => {
+      setSelectedCase(item);
+      setActiveView("case");
+    });
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "tiny-btn";
+    editBtn.textContent = "Редактировать";
+    editBtn.addEventListener("click", () => {
+      openEditCaseDialog(item);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "tiny-btn";
+    deleteBtn.textContent = "Удалить";
+    deleteBtn.addEventListener("click", () => {
+      handleDeleteCase(item);
+    });
+
+    actionsTd.append(viewBtn, editBtn, deleteBtn);
+    tr.append(idTd, titleTd, statusTd, createdTd, assignedTd, actionsTd);
+    elements.caseTableBody.appendChild(tr);
   });
 }
 
@@ -170,9 +370,9 @@ function renderCaseDetails(state) {
     const empty = document.createElement("div");
     empty.className = "placeholder";
     empty.textContent = "Выберите дело, чтобы увидеть детали.";
-    elements.caseDetails.appendChild(empty);
-    return;
-  }
+  elements.caseDetails.appendChild(empty);
+  return;
+}
 
   const rows = [];
   rows.push({
@@ -190,6 +390,10 @@ function renderCaseDetails(state) {
       : "Неизвестно",
   });
   rows.push({
+    label: "Назначенный",
+    value: state.selectedCase ? state.selectedCase.assignedTo || "—" : "—",
+  });
+  rows.push({
     label: "Создано",
     value: state.selectedCase
       ? formatDate(state.selectedCase.createdAt)
@@ -201,6 +405,12 @@ function renderCaseDetails(state) {
       ? formatDate(state.selectedCase.updatedAt)
       : "Неизвестно",
   });
+  if (state.selectedCase && state.selectedCase.description) {
+    rows.push({
+      label: "Описание",
+      value: state.selectedCase.description,
+    });
+  }
 
   rows.forEach((row) => {
     const item = document.createElement("div");
@@ -213,6 +423,167 @@ function renderCaseDetails(state) {
 
     item.append(label, value);
     elements.caseDetails.appendChild(item);
+  });
+}
+
+function resolveArtifactType(artifact) {
+  const source = (artifact.source || "").toLowerCase();
+  if (source.includes("doc") || source.includes("pdf")) return "document";
+  if (source.includes("evidence") || source.includes("proof"))
+    return "evidence";
+  if (source.includes("message") || source.includes("chat")) return "message";
+  if (source.includes("html")) return "document";
+  return "other";
+}
+
+function applyArtifactFilters(state) {
+  const { artifacts, artifactFilters } = state;
+  const search = (artifactFilters.search || "").trim().toLowerCase();
+  const type = artifactFilters.type || "all";
+  let filtered = artifacts.filter((item) => {
+    const artifactType = resolveArtifactType(item);
+    const matchesType = type === "all" || artifactType === type;
+    const matchesSearch =
+      !search ||
+      (item.title || "").toLowerCase().includes(search) ||
+      (item.url || "").toLowerCase().includes(search);
+    return matchesType && matchesSearch;
+  });
+
+  const [sortBy, sortDir] = (artifactFilters.sort || "capturedAt:desc").split(
+    ":"
+  );
+  const dir = sortDir === "asc" ? 1 : -1;
+  filtered = filtered.sort((a, b) => {
+    if (sortBy === "title" || sortBy === "source") {
+      const av = (a[sortBy] || "").toLowerCase();
+      const bv = (b[sortBy] || "").toLowerCase();
+      if (av === bv) return 0;
+      return av > bv ? dir : -dir;
+    }
+    const av = a[sortBy] ? new Date(a[sortBy]).getTime() : 0;
+    const bv = b[sortBy] ? new Date(b[sortBy]).getTime() : 0;
+    return av === bv ? 0 : av > bv ? dir : -dir;
+  });
+
+  return filtered;
+}
+
+function renderArtifactTable(state) {
+  elements.artifactTableBody.innerHTML = "";
+  const rows = applyArtifactFilters(state);
+  if (rows.length && !rows.find((item) => item.id === state.selectedArtifactId)) {
+    setSelectedArtifactId(rows[0].id);
+    return;
+  }
+  if (!rows.length) {
+    elements.artifactTableEmpty.hidden = false;
+    return;
+  }
+  elements.artifactTableEmpty.hidden = true;
+
+  rows.forEach((item) => {
+    const tr = document.createElement("tr");
+    if (state.selectedArtifactId === item.id) {
+      tr.classList.add("is-active");
+    }
+
+    const titleTd = document.createElement("td");
+    titleTd.textContent = item.title || "Без названия";
+    tr.dataset.id = item.id;
+    tr.addEventListener("click", () => {
+      setSelectedArtifactId(item.id);
+    });
+
+    const typeTd = document.createElement("td");
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    const type = resolveArtifactType(item);
+    const typeLabel =
+      type === "document"
+        ? "Документ"
+        : type === "evidence"
+          ? "Доказательство"
+          : type === "message"
+            ? "Сообщение"
+            : "Прочее";
+    tag.textContent = typeLabel;
+    typeTd.appendChild(tag);
+
+    const dateTd = document.createElement("td");
+    dateTd.textContent = formatDate(item.capturedAt);
+
+    const sizeTd = document.createElement("td");
+    sizeTd.textContent = formatBytes(item.size);
+
+    const urlTd = document.createElement("td");
+    urlTd.className = "url-cell";
+    urlTd.title = item.url || "";
+    urlTd.textContent = item.url || "—";
+
+    tr.append(titleTd, typeTd, dateTd, sizeTd, urlTd);
+    elements.artifactTableBody.appendChild(tr);
+  });
+}
+
+function renderArtifactPreview(state) {
+  if (!elements.artifactPreview) return;
+  const container = elements.artifactPreview;
+  container.innerHTML = "";
+  const artifact = state.selectedArtifact;
+  if (!artifact) {
+    const placeholder = document.createElement("div");
+    placeholder.className = "preview-placeholder";
+    placeholder.textContent = "Выберите артефакт для предпросмотра.";
+    container.appendChild(placeholder);
+    return;
+  }
+
+  const title = document.createElement("div");
+  title.className = "preview-title";
+  title.textContent = artifact.title || "Без названия";
+
+  const meta = document.createElement("div");
+  meta.className = "preview-meta";
+  meta.textContent = `${formatDate(artifact.capturedAt)} · ${resolveArtifactType(artifact)} · ${formatBytes(artifact.size)}`;
+
+  const content = document.createElement("div");
+  content.className = "preview-content";
+
+  if (artifact.screenshotFileUrl) {
+    const img = document.createElement("img");
+    img.alt = "Скриншот артефакта";
+    img.src = artifact.screenshotFileUrl;
+    content.appendChild(img);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "preview-placeholder";
+    placeholder.textContent = artifact.url || "Нет содержимого для предпросмотра.";
+    content.appendChild(placeholder);
+  }
+
+  container.append(title, meta, content);
+}
+
+function renderNotes(state) {
+  if (!elements.notePanel || !elements.noteBody) return;
+  const notes = Array.isArray(state.notes) ? state.notes : [];
+  if (!notes.length) {
+    elements.notePanel.hidden = true;
+    elements.noteBody.innerHTML = "";
+    return;
+  }
+  elements.notePanel.hidden = false;
+  elements.noteBody.innerHTML = "";
+  notes.forEach((note) => {
+    const item = document.createElement("div");
+    item.className = "detail-row";
+    const label = document.createElement("span");
+    label.textContent = formatDate(note.createdAt || note.date) || "Дата";
+    const value = document.createElement("span");
+    value.textContent = note.text || "";
+    item.append(label, value);
+    elements.noteBody.appendChild(item);
   });
 }
 
@@ -437,6 +808,40 @@ function updateBrowserBounds() {
   });
 }
 
+function setActiveView(viewKey) {
+  elements.tabs.forEach((tab) => {
+    const tabView = tab.dataset.view;
+    if (tabView === viewKey) {
+      tab.classList.add("is-active");
+    } else {
+      tab.classList.remove("is-active");
+    }
+  });
+  Object.entries(elements.views).forEach(([key, view]) => {
+    if (key === viewKey) {
+      view.classList.add("view--active");
+    } else {
+      view.classList.remove("view--active");
+    }
+  });
+  updateBrowserBounds();
+}
+
+function toggleSidebar() {
+  if (!elements.appRoot || !elements.toggleSidebar) return;
+  const willCollapse = !elements.appRoot.classList.contains(
+    "is-sidebar-collapsed"
+  );
+  elements.appRoot.classList.toggle("is-sidebar-collapsed", willCollapse);
+  if (elements.sidebar) {
+    elements.sidebar.classList.toggle("is-collapsed", willCollapse);
+  }
+  elements.toggleSidebar.title = willCollapse
+    ? "Развернуть панель"
+    : "Свернуть панель";
+  updateBrowserBounds();
+}
+
 function initBrowserBridge() {
   if (!window.api || typeof window.api.onBrowserState !== "function") {
     showBrowserError("IPC браузера недоступен.");
@@ -495,17 +900,8 @@ function initBrowserViewport() {
 function initTabs() {
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
-      elements.tabs.forEach((other) => other.classList.remove("is-active"));
-      tab.classList.add("is-active");
       const viewKey = tab.dataset.view;
-      Object.entries(elements.views).forEach(([key, view]) => {
-        if (key === viewKey) {
-          view.classList.add("view--active");
-        } else {
-          view.classList.remove("view--active");
-        }
-      });
-      updateBrowserBounds();
+      setActiveView(viewKey);
     });
   });
 }
@@ -552,6 +948,20 @@ async function handleCaptureArtifact() {
     } else {
       setArtifactFeedback("success", "Артефакт сохранён.");
     }
+    if (result.data && result.data.artifact) {
+      const artifact = result.data.artifact;
+      const state = store.getState();
+      const artifacts = Array.isArray(state.artifacts)
+        ? [artifact, ...state.artifacts]
+        : [artifact];
+      store.setState({
+        artifacts,
+        selectedArtifactId: artifact.id,
+        selectedArtifact: artifact,
+      });
+    } else if (selectedCaseId) {
+      loadArtifacts(selectedCaseId);
+    }
   } catch (error) {
     console.error("Не удалось сохранить артефакт:", error);
     setArtifactFeedback("error", "Не удалось сохранить артефакт.");
@@ -561,32 +971,38 @@ async function handleCaptureArtifact() {
   }
 }
 
-async function handleCreateCase() {
+async function handleCreateCase(event) {
+  if (event) {
+    event.preventDefault();
+  }
   if (!window.api || typeof window.api.createCase !== "function") {
     window.alert("IPC создания дел недоступен.");
     return;
   }
+  const title = elements.caseFormTitle.value.trim();
+  const description = elements.caseFormDescription.value.trim();
+  const assignedTo = elements.caseFormAssigned.value.trim();
+  const status = elements.caseFormStatus.value;
 
-  const titleInput = window.prompt("Название дела", "Новое дело");
-  if (titleInput === null) {
-    return;
-  }
-  const title = titleInput.trim();
   if (!title) {
     window.alert("Название дела обязательно.");
     return;
   }
 
-  const button = elements.createCase;
-  if (!button || button.disabled) {
-    return;
+  const button = elements.caseFormSubmit;
+  if (button && !button.disabled) {
+    button.disabled = true;
+    button.textContent = "Создание...";
   }
-  const initialLabel = button.textContent;
-  button.disabled = true;
-  button.textContent = "Создание...";
 
   try {
-    const result = await window.api.createCase({ title });
+    const payload = {
+      title,
+      description: description || null,
+      assignedTo: assignedTo || null,
+      status,
+    };
+    const result = await window.api.createCase(payload);
     if (!result || !result.ok) {
       const message =
         result && result.error && result.error.message
@@ -601,12 +1017,108 @@ async function handleCreateCase() {
       selectedCase: createdCase,
     });
     await loadCases();
+    if (elements.caseForm) {
+      elements.caseForm.reset();
+    }
+    setActiveView("case");
   } catch (error) {
     console.error("Не удалось создать дело:", error);
     window.alert("Не удалось создать дело.");
   } finally {
-    button.textContent = initialLabel;
-    button.disabled = false;
+    if (button) {
+      button.textContent = "Создать дело";
+      button.disabled = false;
+    }
+  }
+}
+
+async function openEditCaseDialog(caseItem) {
+  if (!caseItem || !window.api || typeof window.api.updateCase !== "function") {
+    return;
+  }
+  const title = window.prompt("Название дела", caseItem.title || "");
+  if (title === null || !title.trim()) {
+    return;
+  }
+  const description = window.prompt(
+    "Описание",
+    caseItem.description || ""
+  );
+  if (description === null) {
+    return;
+  }
+  const assignedTo = window.prompt(
+    "Назначенный",
+    caseItem.assignedTo || ""
+  );
+  if (assignedTo === null) {
+    return;
+  }
+  const status = window.prompt(
+    "Статус (open/paused/closed/archived)",
+    caseItem.status || "open"
+  );
+  if (status === null) {
+    return;
+  }
+  try {
+    const result = await window.api.updateCase(caseItem.id, {
+      title: title.trim(),
+      description: description.trim(),
+      assignedTo: assignedTo.trim(),
+      status: status.trim(),
+    });
+    if (!result || !result.ok) {
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось обновить дело.";
+      window.alert(message);
+      return;
+    }
+    await loadCases();
+    const updated =
+      result.data &&
+      store.getState().cases.find((item) => item.id === result.data.id);
+    if (updated) {
+      setSelectedCase(updated);
+    }
+  } catch (error) {
+    console.error("Не удалось обновить дело:", error);
+    window.alert("Не удалось обновить дело.");
+  }
+}
+
+async function handleDeleteCase(caseItem) {
+  if (
+    !caseItem ||
+    !window.api ||
+    typeof window.api.deleteCase !== "function"
+  ) {
+    return;
+  }
+  const confirmed = window.confirm(
+    `Удалить дело ${caseItem.id}? Артефакты будут удалены.`
+  );
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const result = await window.api.deleteCase(caseItem.id);
+    if (!result || !result.ok) {
+      window.alert("Не удалось удалить дело.");
+      return;
+    }
+    const state = store.getState();
+    const isActive = state.selectedCaseId === caseItem.id;
+    await loadCases();
+    if (isActive) {
+      setSelectedCase(null);
+      store.setState({ artifacts: [] });
+    }
+  } catch (error) {
+    console.error("Не удалось удалить дело:", error);
+    window.alert("Не удалось удалить дело.");
   }
 }
 
@@ -636,13 +1148,47 @@ async function loadCases() {
   }
 }
 
+async function loadArtifacts(caseId) {
+  if (!window.api || typeof window.api.getCaseArtifacts !== "function") {
+    store.setState({ artifacts: [] });
+    return;
+  }
+  const id = Number(caseId);
+  if (!Number.isInteger(id) || id <= 0) {
+    store.setState({ artifacts: [], selectedArtifact: null, selectedArtifactId: null });
+    return;
+  }
+  try {
+    const result = await window.api.getCaseArtifacts(id);
+    if (!result || !result.ok) {
+      store.setState({ artifacts: [], selectedArtifact: null, selectedArtifactId: null });
+      return;
+    }
+    const artifacts = Array.isArray(result.data) ? result.data : [];
+    const currentSelectedId = store.getState().selectedArtifactId;
+    const found =
+      artifacts.find((item) => item.id === currentSelectedId) || artifacts[0];
+    store.setState({
+      artifacts,
+      selectedArtifact: found || null,
+      selectedArtifactId: found ? found.id : null,
+    });
+  } catch (error) {
+    console.error("Не удалось загрузить артефакты:", error);
+    store.setState({ artifacts: [], selectedArtifact: null, selectedArtifactId: null });
+  }
+}
+
 function bindEvents() {
   elements.refreshCases.addEventListener("click", () => {
     loadCases();
   });
   if (elements.createCase) {
     elements.createCase.addEventListener("click", () => {
-      handleCreateCase();
+      setActiveView("cases");
+      if (elements.caseFormTitle) {
+        elements.caseFormTitle.focus();
+      }
     });
   }
   elements.clearSelection.addEventListener("click", () => {
@@ -658,6 +1204,97 @@ function bindEvents() {
       handleCaptureArtifact();
     });
   }
+  if (elements.caseForm) {
+    elements.caseForm.addEventListener("submit", handleCreateCase);
+  }
+  if (elements.caseFormReset) {
+    elements.caseFormReset.addEventListener("click", () => {
+      if (elements.caseForm) {
+        elements.caseForm.reset();
+      }
+    });
+  }
+  if (elements.caseSearch) {
+    elements.caseSearch.addEventListener("input", (event) => {
+      store.setState({
+        caseFilters: {
+          ...store.getState().caseFilters,
+          search: event.target.value,
+        },
+      });
+    });
+  }
+  if (elements.caseStatusFilter) {
+    elements.caseStatusFilter.addEventListener("change", (event) => {
+      store.setState({
+        caseFilters: {
+          ...store.getState().caseFilters,
+          status: event.target.value,
+        },
+      });
+    });
+  }
+  if (elements.caseAssigneeFilter) {
+    elements.caseAssigneeFilter.addEventListener("input", (event) => {
+      store.setState({
+        caseFilters: {
+          ...store.getState().caseFilters,
+          assignee: event.target.value,
+        },
+      });
+    });
+  }
+  if (elements.caseTableBody && elements.caseTableBody.parentElement) {
+    const thead = elements.caseTableBody.parentElement.querySelector("thead");
+    if (thead) {
+      thead.addEventListener("click", (event) => {
+        const th = event.target.closest("th");
+        if (!th || !th.dataset.sort) return;
+        const sortBy = th.dataset.sort;
+        const current = store.getState().caseSort;
+        const sortDir =
+          current.sortBy === sortBy && current.sortDir === "asc"
+            ? "desc"
+            : "asc";
+        store.setState({ caseSort: { sortBy, sortDir } });
+      });
+    }
+  }
+  if (elements.artifactTypeFilter) {
+    elements.artifactTypeFilter.addEventListener("change", (event) => {
+      store.setState({
+        artifactFilters: {
+          ...store.getState().artifactFilters,
+          type: event.target.value,
+        },
+      });
+    });
+  }
+  if (elements.artifactSearch) {
+    elements.artifactSearch.addEventListener("input", (event) => {
+      store.setState({
+        artifactFilters: {
+          ...store.getState().artifactFilters,
+          search: event.target.value,
+        },
+      });
+    });
+  }
+  if (elements.artifactSort) {
+    elements.artifactSort.addEventListener("change", (event) => {
+      store.setState({
+        artifactFilters: {
+          ...store.getState().artifactFilters,
+          sort: event.target.value,
+        },
+      });
+    });
+  }
+  if (elements.toggleSidebar) {
+    elements.toggleSidebar.addEventListener("click", () => {
+      toggleSidebar();
+    });
+  }
   window.addEventListener("osint:set-case-id", (event) => {
     const caseId = event.detail ? Number(event.detail.caseId) : null;
     setSelectedCaseId(caseId);
@@ -666,8 +1303,12 @@ function bindEvents() {
 
 store.subscribe((state) => {
   renderCaseList(state);
+  renderCaseTable(state);
   renderCaseSummary(state);
   renderCaseDetails(state);
+  renderArtifactTable(state);
+  renderArtifactPreview(state);
+  renderNotes(state);
   updateBrowserCaseState(state);
   updateCaptureAvailability(state);
 });

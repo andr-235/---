@@ -262,6 +262,7 @@ function mapCaseRow(row) {
     id: row.id,
     title: row.title,
     description: row.description,
+    assignedTo: row.assigned_to,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -269,6 +270,18 @@ function mapCaseRow(row) {
 }
 
 function mapArtifactRow(row, baseDir) {
+  const screenshotPath = sanitizeStoredPath(baseDir, row.screenshot_path);
+  const htmlPath = sanitizeStoredPath(baseDir, row.html_path);
+  const textPath = sanitizeStoredPath(baseDir, row.text_path);
+  const size =
+    getStoredFileSize(baseDir, screenshotPath) +
+    getStoredFileSize(baseDir, htmlPath) +
+    getStoredFileSize(baseDir, textPath);
+  const toFileUrl = (relativePath) => {
+    if (!relativePath) return null;
+    const absolute = safeJoin(baseDir, relativePath);
+    return `file://${absolute.replace(/\\/g, "/")}`;
+  };
   return {
     id: row.id,
     caseId: row.case_id,
@@ -277,10 +290,28 @@ function mapArtifactRow(row, baseDir) {
     url: row.url,
     title: row.title,
     capturedAt: row.captured_at,
-    screenshotPath: sanitizeStoredPath(baseDir, row.screenshot_path),
-    htmlPath: sanitizeStoredPath(baseDir, row.html_path),
-    textPath: sanitizeStoredPath(baseDir, row.text_path),
+    screenshotPath,
+    htmlPath,
+    textPath,
+    size,
+    screenshotFileUrl: toFileUrl(screenshotPath),
+    htmlFileUrl: toFileUrl(htmlPath),
+    textFileUrl: toFileUrl(textPath),
   };
+}
+
+function getStoredFileSize(baseDir, relativePath) {
+  if (!relativePath) return 0;
+  try {
+    const absolute = safeJoin(baseDir, relativePath);
+    const stats = fs.statSync(absolute);
+    if (stats.isFile()) {
+      return stats.size;
+    }
+  } catch (error) {
+    return 0;
+  }
+  return 0;
 }
 
 function normalizeBrowserUrl(value) {
@@ -621,7 +652,7 @@ ipcMain.handle(
       const db = getDb();
       const rows = db
         .prepare(
-          `SELECT id, title, description, status, created_at, updated_at
+          `SELECT id, title, description, assigned_to, status, created_at, updated_at
            FROM cases
            ORDER BY created_at DESC, id DESC`
         )
@@ -656,6 +687,14 @@ ipcMain.handle(
     if (!descriptionResult.ok) {
       return fail("INVALID_ARGUMENT", descriptionResult.error);
     }
+    const assignedResult = validateOptionalString(
+      caseData.assignedTo,
+      "assignedTo",
+      MAX_LABEL_LENGTH
+    );
+    if (!assignedResult.ok) {
+      return fail("INVALID_ARGUMENT", assignedResult.error);
+    }
     const statusValue =
       typeof caseData.status === "string" ? caseData.status.trim() : "";
     const status = statusValue || "open";
@@ -670,13 +709,18 @@ ipcMain.handle(
       const db = getDb();
       const result = db
         .prepare(
-          `INSERT INTO cases (title, description, status, created_at)
-           VALUES (?, ?, ?, datetime('now'))`
+          `INSERT INTO cases (title, description, assigned_to, status, created_at)
+           VALUES (?, ?, ?, ?, datetime('now'))`
         )
-        .run(titleResult.value, descriptionResult.value, status);
+        .run(
+          titleResult.value,
+          descriptionResult.value,
+          assignedResult.value,
+          status
+        );
       const row = db
         .prepare(
-          `SELECT id, title, description, status, created_at, updated_at
+          `SELECT id, title, description, assigned_to, status, created_at, updated_at
            FROM cases
            WHERE id = ?`
         )
@@ -721,6 +765,110 @@ ipcMain.handle(
     } catch (error) {
       console.error("[DB] getCaseArtifacts failed:", error);
       return fail("DB_ERROR", "Не удалось загрузить артефакты.");
+    }
+  })
+);
+
+ipcMain.handle(
+  "cases:update",
+  wrapIpc("cases:update", async (caseId, data) => {
+    const id = parsePositiveInt(caseId);
+    if (!id) {
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
+    }
+    if (!isPlainObject(data)) {
+      return fail("INVALID_ARGUMENT", "data должно быть объектом.");
+    }
+    const titleResult = validateRequiredString(
+      data.title,
+      "title",
+      MAX_TITLE_LENGTH
+    );
+    if (!titleResult.ok) {
+      return fail("INVALID_ARGUMENT", titleResult.error);
+    }
+    const descriptionResult = validateOptionalString(
+      data.description,
+      "description",
+      MAX_DESCRIPTION_LENGTH
+    );
+    if (!descriptionResult.ok) {
+      return fail("INVALID_ARGUMENT", descriptionResult.error);
+    }
+    const assignedResult = validateOptionalString(
+      data.assignedTo,
+      "assignedTo",
+      MAX_LABEL_LENGTH
+    );
+    if (!assignedResult.ok) {
+      return fail("INVALID_ARGUMENT", assignedResult.error);
+    }
+    const statusValue =
+      typeof data.status === "string" ? data.status.trim() : "";
+    const status = statusValue || "open";
+    if (!ALLOWED_STATUSES.has(status)) {
+      return fail(
+        "INVALID_ARGUMENT",
+        `status должен быть одним из: ${Array.from(ALLOWED_STATUSES).join(", ")}.`
+      );
+    }
+
+    try {
+      const db = getDb();
+      const exists = db.prepare("SELECT id FROM cases WHERE id = ?").get(id);
+      if (!exists) {
+        return fail("NOT_FOUND", "Дело не найдено.");
+      }
+      db.prepare(
+        `UPDATE cases
+         SET title = ?, description = ?, assigned_to = ?, status = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ).run(
+        titleResult.value,
+        descriptionResult.value,
+        assignedResult.value,
+        status,
+        id
+      );
+      const row = db
+        .prepare(
+          `SELECT id, title, description, assigned_to, status, created_at, updated_at
+           FROM cases
+           WHERE id = ?`
+        )
+        .get(id);
+      return ok(mapCaseRow(row));
+    } catch (error) {
+      console.error("[DB] updateCase failed:", error);
+      return fail("DB_ERROR", "Не удалось обновить дело.");
+    }
+  })
+);
+
+ipcMain.handle(
+  "cases:delete",
+  wrapIpc("cases:delete", async (caseId) => {
+    const id = parsePositiveInt(caseId);
+    if (!id) {
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
+    }
+    try {
+      const db = getDb();
+      const exists = db.prepare("SELECT id FROM cases WHERE id = ?").get(id);
+      if (!exists) {
+        return fail("NOT_FOUND", "Дело не найдено.");
+      }
+      db.prepare("DELETE FROM cases WHERE id = ?").run(id);
+      return ok({ deleted: true });
+    } catch (error) {
+      console.error("[DB] deleteCase failed:", error);
+      return fail("DB_ERROR", "Не удалось удалить дело.");
     }
   })
 );

@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld("api", {
   getAppVersion: () => ipcRenderer.invoke("app:get-version"),
   getCases: () => ipcRenderer.invoke("cases:get-all"),
   createCase: (caseData) => ipcRenderer.invoke("cases:create", caseData),
+  updateCase: (caseId, caseData) =>
+    ipcRenderer.invoke("cases:update", caseId, caseData),
+  deleteCase: (caseId) => ipcRenderer.invoke("cases:delete", caseId),
   getCaseArtifacts: (caseId) =>
     ipcRenderer.invoke("cases:get-artifacts", caseId),
   saveArtifact: (caseId, artifactData) =>

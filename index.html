@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src https:; child-src https:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file:; frame-src https:; child-src https:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Центр расследований ОСИНТ</title>
@@ -14,11 +14,36 @@
     <div class="app">
       <aside class="sidebar">
         <div class="sidebar__header">
-          <div>
+          <div class="sidebar__brand">
             <div class="app-title">Центр расследований ОСИНТ</div>
             <div class="app-subtitle">Локальное рабочее пространство</div>
           </div>
           <div class="sidebar__actions">
+            <button
+              class="ghost-btn icon-btn"
+              id="toggleSidebar"
+              type="button"
+              aria-label="Свернуть панель"
+              title="Свернуть панель"
+            >
+              <svg
+                class="icon"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M10 6l-6 6 6 6M20 6l-6 6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
             <button class="ghost-btn" id="createCase" type="button">
               Создать
             </button>
@@ -50,11 +75,137 @@
             <button class="tab is-active" data-view="browser" type="button">
               Браузер
             </button>
+            <button class="tab" data-view="cases" type="button">
+              Дела
+            </button>
             <button class="tab" data-view="case" type="button">
               Дело
             </button>
           </div>
         </header>
+        <section class="view" id="view-cases">
+          <div class="case-panel">
+            <div class="case-panel__header">
+              <div>
+                <div class="panel-title">Создать дело</div>
+                <div class="panel-subtitle">
+                  Название обязательно, остальное — по желанию.
+                </div>
+              </div>
+            </div>
+            <form class="case-form" id="caseForm">
+              <div class="form-grid">
+                <label class="form-field">
+                  <span class="form-label">Название *</span>
+                  <input
+                    id="caseFormTitle"
+                    name="title"
+                    class="input"
+                    required
+                    maxlength="200"
+                    placeholder="Например, Мониторинг паблика..."
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="form-label">Назначенный</span>
+                  <input
+                    id="caseFormAssigned"
+                    name="assignedTo"
+                    class="input"
+                    maxlength="200"
+                    placeholder="Адвокат или аналитик"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="form-label">Статус</span>
+                  <select id="caseFormStatus" name="status" class="input">
+                    <option value="open">Открыто</option>
+                    <option value="paused">Пауза</option>
+                    <option value="closed">Закрыто</option>
+                    <option value="archived">Архив</option>
+                  </select>
+                </label>
+              </div>
+              <label class="form-field">
+                <span class="form-label">Описание</span>
+                <textarea
+                  id="caseFormDescription"
+                  name="description"
+                  class="input textarea"
+                  maxlength="4000"
+                  rows="3"
+                  placeholder="Кратко опишите контекст и цель."
+                ></textarea>
+              </label>
+              <div class="form-actions">
+                <button class="primary-btn" id="caseFormSubmit" type="submit">
+                  Создать дело
+                </button>
+                <button class="outline-btn" id="caseFormReset" type="button">
+                  Очистить
+                </button>
+              </div>
+            </form>
+          </div>
+          <div class="case-panel">
+            <div class="case-panel__header">
+              <div>
+                <div class="panel-title">Список дел</div>
+                <div class="panel-subtitle">
+                  Сортировка по клику на заголовок, фильтры над таблицей.
+                </div>
+              </div>
+            </div>
+            <div class="table-filters">
+              <div class="filter-group">
+                <label class="form-label">Поиск</label>
+                <input
+                  id="caseSearch"
+                  class="input"
+                  type="search"
+                  placeholder="По названию или номеру"
+                />
+              </div>
+              <div class="filter-group">
+                <label class="form-label">Статус</label>
+                <select id="caseStatusFilter" class="input">
+                  <option value="all">Все</option>
+                  <option value="open">Открыто</option>
+                  <option value="paused">Пауза</option>
+                  <option value="closed">Закрыто</option>
+                  <option value="archived">Архив</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="form-label">Назначенный</label>
+                <input
+                  id="caseAssigneeFilter"
+                  class="input"
+                  type="search"
+                  placeholder="Фильтр по человеку"
+                />
+              </div>
+            </div>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th data-sort="id">№</th>
+                    <th data-sort="title">Название</th>
+                    <th data-sort="status">Статус</th>
+                    <th data-sort="createdAt">Создано</th>
+                    <th data-sort="assignedTo">Назначенный</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody id="caseTableBody"></tbody>
+              </table>
+              <div class="table-empty" id="caseTableEmpty" hidden>
+                Дел не найдено по выбранным фильтрам.
+              </div>
+            </div>
+          </div>
+        </section>
         <section class="view view--active" id="view-browser">
           <div class="quick-nav" id="quickNav"></div>
           <div class="browser-meta">
@@ -93,24 +244,86 @@
         <section class="view" id="view-case">
           <div class="case-panel">
             <div class="case-panel__header">
-              <div class="panel-title">Обзор дела</div>
-              <div class="panel-subtitle">
-                Состояние синхронизируется между вкладками.
-              </div>
+            <div class="panel-title">Обзор дела</div>
+            <div class="panel-subtitle">
+              Состояние синхронизируется между вкладками.
             </div>
-            <div class="case-panel__body" id="caseDetails"></div>
           </div>
+          <div class="case-panel__body" id="caseDetails"></div>
+        </div>
           <div class="case-panel">
             <div class="case-panel__header">
-              <div class="panel-title">Заметки</div>
+              <div class="panel-title">Артефакты</div>
               <div class="panel-subtitle">
-                Зарезервировано для заметок и тегов.
+                Фильтруйте и сортируйте материалы дела.
               </div>
             </div>
-            <div class="case-panel__body">
-              <div class="placeholder">Пока нет заметок.</div>
+            <div class="artifact-controls">
+              <div class="filter-group">
+                <label class="form-label">Категория</label>
+                <select id="artifactTypeFilter" class="input">
+                  <option value="all">Все</option>
+                  <option value="document">Документы</option>
+                  <option value="evidence">Доказательства</option>
+                  <option value="message">Сообщения</option>
+                  <option value="other">Прочее</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label class="form-label">Поиск</label>
+                <input
+                  id="artifactSearch"
+                  class="input"
+                  type="search"
+                  placeholder="Название или URL"
+                />
+              </div>
+              <div class="filter-group">
+                <label class="form-label">Сортировка</label>
+                <select id="artifactSort" class="input">
+                  <option value="capturedAt:desc">Дата (новые)</option>
+                  <option value="capturedAt:asc">Дата (старые)</option>
+                  <option value="title:asc">Название (А-Я)</option>
+                  <option value="title:desc">Название (Я-А)</option>
+                  <option value="source:asc">Тип (А-Я)</option>
+                  <option value="source:desc">Тип (Я-А)</option>
+                </select>
+              </div>
+            </div>
+            <div class="artifact-layout">
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Название</th>
+                      <th>Тип</th>
+                      <th>Дата</th>
+                      <th>Размер</th>
+                      <th>URL</th>
+                    </tr>
+                  </thead>
+                  <tbody id="artifactTableBody"></tbody>
+                </table>
+                <div class="table-empty" id="artifactTableEmpty" hidden>
+                  Артефактов нет или ничего не найдено.
+                </div>
+              </div>
+              <div class="artifact-preview" id="artifactPreview">
+                <div class="preview-placeholder">
+                  Выберите артефакт для предпросмотра.
+                </div>
+              </div>
             </div>
           </div>
+        <div class="case-panel" id="notePanel" hidden>
+          <div class="case-panel__header">
+            <div class="panel-title">Заметки</div>
+            <div class="panel-subtitle">
+              Хронология комментариев и меток по делу.
+            </div>
+          </div>
+          <div class="case-panel__body" id="noteBody"></div>
+        </div>
         </section>
       </main>
     </div>

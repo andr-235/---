@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS cases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
   description TEXT,
+  assigned_to TEXT,
   status TEXT NOT NULL DEFAULT 'open',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT
@@ -87,6 +88,7 @@ function initDb() {
     console.log("[DB] Path:", dbPath);
     db = new Database(dbPath);
     db.exec(schemaSql);
+    ensureCaseColumns(db);
 
     return db;
   } catch (err) {
@@ -114,6 +116,18 @@ function closeDb() {
     if (db) db.close();
   } catch (err) {
     console.warn("[DB] закрытие не удалось:", err);
+  }
+}
+
+function ensureCaseColumns(database) {
+  try {
+    const columns = database.prepare("PRAGMA table_info(cases)").all();
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("assigned_to")) {
+      database.exec("ALTER TABLE cases ADD COLUMN assigned_to TEXT;");
+    }
+  } catch (error) {
+    console.warn("[DB] не удалось проверить или добавить assigned_to:", error);
   }
 }
 
