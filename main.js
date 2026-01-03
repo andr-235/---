@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const path = require("path");
+const { initDb, closeDb } = require("./db");
 
 let mainWindow = null;
 
@@ -36,19 +37,32 @@ function createMainWindow() {
 
 ipcMain.handle("app:get-version", () => app.getVersion());
 
-app.on("ready", () => {
-  Menu.setApplicationMenu(null);
-  createMainWindow();
-});
+app
+  .whenReady()
+  .then(() => {
+    Menu.setApplicationMenu(null);
+    initDb();
+    createMainWindow();
+  })
+  .catch((error) => {
+    console.error("App failed to initialize:", error);
+    app.exit(1);
+  });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow();
-  }
+  app.whenReady().then(() => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow();
+    }
+  });
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  closeDb();
 });

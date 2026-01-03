@@ -16,6 +16,7 @@ out/
 # Screenshots and artifacts
 screenshots/
 artifacts/
+db/
 
 # OS generated files
 .DS_Store
