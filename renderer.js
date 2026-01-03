@@ -18,6 +18,21 @@ const statusLabels = {
   archived: "Архив",
 };
 
+function createEmptyLegalForm() {
+  return { legalMarkId: "", articleText: "", comment: "" };
+}
+
+function buildLegalFormFromArtifact(artifact) {
+  if (!artifact) {
+    return createEmptyLegalForm();
+  }
+  return {
+    legalMarkId: artifact.legalMarkId ? String(artifact.legalMarkId) : "",
+    articleText: artifact.articleText || "",
+    comment: artifact.legalComment || "",
+  };
+}
+
 function createStore(initialState) {
   let state = { ...initialState };
   const listeners = new Set();
@@ -48,6 +63,11 @@ const store = createStore({
   selectedArtifactId: null,
   selectedArtifact: null,
   notes: [],
+  legalMarks: [],
+  legalMarkSearch: "",
+  legalForm: createEmptyLegalForm(),
+  legalFeedback: null,
+  legalFormSaving: false,
   artifactFilters: {
     type: "all",
     search: "",
@@ -120,6 +140,17 @@ const navButtons = new Map();
 let lastUrl = "https://vk.com";
 let artifactFeedbackTimer = null;
 let browserNoticeTimer = null;
+let legalSearchValue = "";
+const legalCardRefs = {
+  artifactId: null,
+  searchInput: null,
+  select: null,
+  searchHint: null,
+  articleInput: null,
+  commentInput: null,
+  submit: null,
+  feedback: null,
+};
 const MAX_URL_DISPLAY_LENGTH = 140;
 
 function formatDate(value) {
@@ -158,6 +189,9 @@ function setSelectedCaseId(caseId) {
       selectedArtifactId: null,
       selectedArtifact: null,
       notes: [],
+      legalForm: createEmptyLegalForm(),
+      legalFeedback: null,
+      legalFormSaving: false,
     });
     return;
   }
@@ -169,6 +203,9 @@ function setSelectedCaseId(caseId) {
     selectedArtifactId: null,
     selectedArtifact: null,
     notes: [],
+    legalForm: createEmptyLegalForm(),
+    legalFeedback: null,
+    legalFormSaving: false,
   });
   if (normalizedId) {
     loadArtifacts(normalizedId);
@@ -184,6 +221,9 @@ function setSelectedCase(caseItem) {
       selectedArtifactId: null,
       selectedArtifact: null,
       notes: [],
+      legalForm: createEmptyLegalForm(),
+      legalFeedback: null,
+      legalFormSaving: false,
     });
     return;
   }
@@ -193,6 +233,9 @@ function setSelectedCase(caseItem) {
     selectedArtifactId: null,
     selectedArtifact: null,
     notes: [],
+    legalForm: createEmptyLegalForm(),
+    legalFeedback: null,
+    legalFormSaving: false,
   });
   if (caseItem && caseItem.id) {
     loadArtifacts(caseItem.id);
@@ -206,6 +249,8 @@ function setSelectedArtifactId(artifactId) {
   store.setState({
     selectedArtifactId: found ? found.id : null,
     selectedArtifact: found,
+    legalForm: buildLegalFormFromArtifact(found),
+    legalFeedback: null,
   });
 }
 
@@ -526,6 +571,221 @@ function renderArtifactTable(state) {
   });
 }
 
+function renderLegalCard(state) {
+  const artifact = state.selectedArtifact;
+  const legalForm = state.legalForm || createEmptyLegalForm();
+  const marks = Array.isArray(state.legalMarks) ? state.legalMarks : [];
+  const sortedMarks = [...marks].sort((a, b) =>
+    (a.label || "").localeCompare(b.label || "")
+  );
+
+  const card = document.createElement("div");
+  card.className = "legal-card";
+
+  const header = document.createElement("div");
+  header.className = "legal-card__header";
+  const title = document.createElement("div");
+  title.className = "legal-card__title";
+  title.textContent = "Юридическая фиксация";
+  const subtitle = document.createElement("div");
+  subtitle.className = "legal-card__subtitle";
+  subtitle.textContent =
+    "Выберите метку нарушения, укажите статью и комментарий.";
+  header.append(title, subtitle);
+
+  const feedback = document.createElement("div");
+  feedback.className = "legal-card__feedback";
+  if (state.legalFeedback && state.legalFeedback.message) {
+    feedback.textContent = state.legalFeedback.message;
+    feedback.dataset.tone = state.legalFeedback.tone || "info";
+  } else {
+    feedback.hidden = true;
+  }
+
+  const form = document.createElement("form");
+  form.className = "legal-form";
+
+  const searchField = document.createElement("label");
+  searchField.className = "form-field";
+  const searchLabel = document.createElement("span");
+  searchLabel.className = "form-label";
+  searchLabel.textContent = "Поиск по меткам";
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "input";
+  searchInput.placeholder = "Начните вводить название";
+  searchInput.value = legalSearchValue;
+  searchField.append(searchLabel, searchInput);
+
+  const selectField = document.createElement("label");
+  selectField.className = "form-field";
+  const selectLabel = document.createElement("span");
+  selectLabel.className = "form-label";
+  selectLabel.textContent = "Метка нарушения *";
+  const select = document.createElement("select");
+  select.className = "input";
+  select.required = true;
+  select.disabled =
+    !marks.length || state.legalFormSaving || !artifact;
+  selectField.append(selectLabel, select);
+
+  const searchHint = document.createElement("div");
+  searchHint.className = "legal-card__hint";
+
+  const articleField = document.createElement("label");
+  articleField.className = "form-field";
+  const articleLabel = document.createElement("span");
+  articleLabel.className = "form-label";
+  articleLabel.textContent = "article_text (обязательно)";
+  const articleInput = document.createElement("textarea");
+  articleInput.className = "input textarea";
+  articleInput.rows = 3;
+  articleInput.required = true;
+  articleInput.placeholder = "Например, Статья 13.15 КоАП РФ...";
+  articleInput.value = legalForm.articleText || "";
+  articleInput.disabled = !artifact;
+  articleField.append(articleLabel, articleInput);
+
+  const commentField = document.createElement("label");
+  commentField.className = "form-field";
+  const commentLabel = document.createElement("span");
+  commentLabel.className = "form-label";
+  commentLabel.textContent = "Комментарий (необязательно)";
+  const commentInput = document.createElement("textarea");
+  commentInput.className = "input textarea";
+  commentInput.rows = 3;
+  commentInput.placeholder =
+    "Кратко опишите контекст нарушения или источник информации.";
+  commentInput.value = legalForm.comment || "";
+  commentInput.disabled = !artifact;
+  commentField.append(commentLabel, commentInput);
+
+  const commentHint = document.createElement("div");
+  commentHint.className = "legal-card__hint";
+  commentHint.textContent =
+    "Комментарий не обязателен, но помогает восстановить контекст.";
+
+  const actions = document.createElement("div");
+  actions.className = "form-actions";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.className = "primary-btn";
+  submit.textContent = "Сохранить метку";
+  actions.appendChild(submit);
+
+  const refreshSubmitState = () => {
+    submit.disabled =
+      !artifact ||
+      !marks.length ||
+      state.legalFormSaving ||
+      !select.value;
+  };
+
+  const refreshOptions = (value) => {
+    const search = (value || "").trim().toLowerCase();
+    const filteredMarks = search
+      ? sortedMarks.filter((mark) =>
+          (mark.label || "").toLowerCase().includes(search)
+        )
+      : sortedMarks;
+    const currentValue = select.value || legalForm.legalMarkId || "";
+    const currentMark = currentValue
+      ? sortedMarks.find((mark) => String(mark.id) === String(currentValue))
+      : null;
+
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = marks.length
+      ? "Выберите метку"
+      : "В справочнике нет меток";
+    select.appendChild(placeholder);
+
+    if (
+      !marks.length &&
+      legalForm.legalMarkId &&
+      artifact &&
+      artifact.legalMarkLabel
+    ) {
+      const preserved = document.createElement("option");
+      preserved.value = legalForm.legalMarkId;
+      preserved.textContent = `${artifact.legalMarkLabel} (текущее)`;
+      select.appendChild(preserved);
+    }
+
+    if (
+      currentMark &&
+      search &&
+      !filteredMarks.some(
+        (mark) => String(mark.id) === String(currentValue)
+      )
+    ) {
+      const currentOption = document.createElement("option");
+      currentOption.value = String(currentMark.id);
+      currentOption.textContent = `${currentMark.label} (текущее)`;
+      select.appendChild(currentOption);
+    }
+
+    const listToRender = filteredMarks.length ? filteredMarks : sortedMarks;
+    listToRender.forEach((mark) => {
+      const option = document.createElement("option");
+      option.value = String(mark.id);
+      option.textContent = mark.label;
+      select.appendChild(option);
+    });
+
+    select.value = currentValue || "";
+    if (marks.length > 0 && search && !filteredMarks.length) {
+      searchHint.textContent =
+        "Поиск не дал результатов. Снимите фильтр или измените запрос.";
+      searchHint.hidden = false;
+    } else if (!marks.length) {
+      searchHint.textContent =
+        "Добавьте юридические метки в базу, чтобы выбрать нарушение.";
+      searchHint.hidden = false;
+    } else {
+      searchHint.hidden = true;
+    }
+    refreshSubmitState();
+  };
+
+  searchInput.addEventListener("input", (event) => {
+    legalSearchValue = event.target.value;
+    refreshOptions(legalSearchValue);
+  });
+
+  select.addEventListener("change", () => {
+    refreshSubmitState();
+  });
+
+  refreshOptions(legalSearchValue);
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleLegalFormSubmit(submit);
+  });
+
+  form.append(
+    searchField,
+    selectField,
+    searchHint,
+    articleField,
+    commentField,
+    commentHint,
+    actions
+  );
+  card.append(header, feedback, form);
+  legalCardRefs.artifactId = artifact ? artifact.id : null;
+  legalCardRefs.searchInput = searchInput;
+  legalCardRefs.select = select;
+  legalCardRefs.searchHint = searchHint;
+  legalCardRefs.articleInput = articleInput;
+  legalCardRefs.commentInput = commentInput;
+  legalCardRefs.submit = submit;
+  legalCardRefs.feedback = feedback;
+  return card;
+}
+
 function renderArtifactPreview(state) {
   if (!elements.artifactPreview) return;
   const container = elements.artifactPreview;
@@ -562,7 +822,7 @@ function renderArtifactPreview(state) {
     content.appendChild(placeholder);
   }
 
-  container.append(title, meta, content);
+  container.append(title, meta, content, renderLegalCard(state));
 }
 
 function renderNotes(state) {
@@ -697,6 +957,12 @@ function setArtifactFeedback(tone, message) {
   artifactFeedbackTimer = window.setTimeout(() => {
     clearArtifactFeedback();
   }, 6000);
+}
+
+function setLegalFeedback(tone, message) {
+  store.setState({
+    legalFeedback: tone && message ? { tone, message } : null,
+  });
 }
 
 function updateCaptureAvailability(state) {
@@ -958,6 +1224,9 @@ async function handleCaptureArtifact() {
         artifacts,
         selectedArtifactId: artifact.id,
         selectedArtifact: artifact,
+        legalForm: buildLegalFormFromArtifact(artifact),
+        legalFeedback: null,
+        legalFormSaving: false,
       });
     } else if (selectedCaseId) {
       loadArtifacts(selectedCaseId);
@@ -1148,6 +1417,25 @@ async function loadCases() {
   }
 }
 
+async function loadLegalMarks() {
+  if (!window.api || typeof window.api.listLegalMarks !== "function") {
+    store.setState({ legalMarks: [] });
+    return;
+  }
+  try {
+    const result = await window.api.listLegalMarks();
+    if (!result || !result.ok) {
+      store.setState({ legalMarks: [] });
+      return;
+    }
+    const legalMarks = Array.isArray(result.data) ? result.data : [];
+    store.setState({ legalMarks });
+  } catch (error) {
+    console.error("Не удалось загрузить юридические метки:", error);
+    store.setState({ legalMarks: [] });
+  }
+}
+
 async function loadArtifacts(caseId) {
   if (!window.api || typeof window.api.getCaseArtifacts !== "function") {
     store.setState({ artifacts: [] });
@@ -1155,13 +1443,27 @@ async function loadArtifacts(caseId) {
   }
   const id = Number(caseId);
   if (!Number.isInteger(id) || id <= 0) {
-    store.setState({ artifacts: [], selectedArtifact: null, selectedArtifactId: null });
+    store.setState({
+      artifacts: [],
+      selectedArtifact: null,
+      selectedArtifactId: null,
+      legalForm: createEmptyLegalForm(),
+      legalFeedback: null,
+      legalFormSaving: false,
+    });
     return;
   }
   try {
     const result = await window.api.getCaseArtifacts(id);
     if (!result || !result.ok) {
-      store.setState({ artifacts: [], selectedArtifact: null, selectedArtifactId: null });
+      store.setState({
+        artifacts: [],
+        selectedArtifact: null,
+        selectedArtifactId: null,
+        legalForm: createEmptyLegalForm(),
+        legalFeedback: null,
+        legalFormSaving: false,
+      });
       return;
     }
     const artifacts = Array.isArray(result.data) ? result.data : [];
@@ -1172,10 +1474,124 @@ async function loadArtifacts(caseId) {
       artifacts,
       selectedArtifact: found || null,
       selectedArtifactId: found ? found.id : null,
+      legalForm: buildLegalFormFromArtifact(found),
+      legalFeedback: null,
+      legalFormSaving: false,
     });
   } catch (error) {
     console.error("Не удалось загрузить артефакты:", error);
-    store.setState({ artifacts: [], selectedArtifact: null, selectedArtifactId: null });
+    store.setState({
+      artifacts: [],
+      selectedArtifact: null,
+      selectedArtifactId: null,
+      legalForm: createEmptyLegalForm(),
+      legalFeedback: null,
+      legalFormSaving: false,
+    });
+  }
+}
+
+async function handleLegalFormSubmit(button) {
+  const state = store.getState();
+  const artifact = state.selectedArtifact;
+  if (!artifact) {
+    setLegalFeedback("error", "Выберите артефакт для сохранения метки.");
+    return;
+  }
+  if (!window.api || typeof window.api.setArtifactLegal !== "function") {
+    setLegalFeedback(
+      "error",
+      "IPC сохранения юридических меток недоступен."
+    );
+    return;
+  }
+
+  if (state.legalFormSaving) {
+    return;
+  }
+
+  const useRefs =
+    legalCardRefs.artifactId && legalCardRefs.artifactId === artifact.id;
+  const markValue = useRefs && legalCardRefs.select
+    ? legalCardRefs.select.value
+    : state.legalForm.legalMarkId;
+  const articleValue = useRefs && legalCardRefs.articleInput
+    ? legalCardRefs.articleInput.value
+    : state.legalForm.articleText;
+  const commentValue = useRefs && legalCardRefs.commentInput
+    ? legalCardRefs.commentInput.value
+    : state.legalForm.comment;
+
+  const markId = Number(markValue);
+  if (!Number.isInteger(markId) || markId <= 0) {
+    setLegalFeedback("error", "Выберите метку нарушения из списка.");
+    return;
+  }
+  const articleText = (articleValue || "").trim();
+  if (!articleText) {
+    setLegalFeedback("error", "Поле article_text обязательно для заполнения.");
+    return;
+  }
+  const commentText = (commentValue || "").trim();
+
+  const initialLabel = button ? button.textContent : null;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Сохранение...";
+  }
+  const currentForm = state.legalForm || createEmptyLegalForm();
+  store.setState({
+    legalFormSaving: true,
+    legalFeedback: null,
+    legalForm: {
+      ...currentForm,
+      legalMarkId: String(markId),
+      articleText,
+      comment: commentText,
+    },
+  });
+
+  try {
+    const result = await window.api.setArtifactLegal(artifact.id, {
+      legalMarkId: markId,
+      articleText,
+      comment: commentText || null,
+    });
+    if (!result || !result.ok) {
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось сохранить юридические данные.";
+      setLegalFeedback("error", message);
+      return;
+    }
+    const updatedArtifact =
+      result.data && result.data.id ? result.data : artifact;
+    const artifacts = Array.isArray(state.artifacts)
+      ? state.artifacts.map((item) =>
+          item.id === updatedArtifact.id ? updatedArtifact : item
+        )
+      : [updatedArtifact];
+    const tone = commentText ? "success" : "warning";
+    const message = commentText
+      ? "Юридическая метка сохранена."
+      : "Сохранено без комментария. Добавьте контекст при необходимости.";
+    store.setState({
+      artifacts,
+      selectedArtifact: updatedArtifact,
+      selectedArtifactId: updatedArtifact.id,
+      legalForm: buildLegalFormFromArtifact(updatedArtifact),
+      legalFeedback: { tone, message },
+    });
+  } catch (error) {
+    console.error("Не удалось сохранить юридические данные:", error);
+    setLegalFeedback("error", "Не удалось сохранить юридические данные.");
+  } finally {
+    store.setState({ legalFormSaving: false });
+    if (button) {
+      button.disabled = false;
+      button.textContent = initialLabel;
+    }
   }
 }
 
@@ -1318,5 +1734,6 @@ initBrowserBridge();
 initBrowserViewport();
 initTabs();
 bindEvents();
+loadLegalMarks();
 loadCases();
 navigateTo(lastUrl, "vk");

@@ -825,6 +825,71 @@ button:focus-visible {
   width: 100%;
 }
 
+.legal-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #f7f9ff 0%, #ffffff 100%);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legal-card__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legal-card__title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.legal-card__subtitle {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.legal-card__feedback {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  background: var(--surface);
+}
+
+.legal-card__feedback[data-tone="error"] {
+  border-color: #d14343;
+  color: #d14343;
+  background: #fff5f5;
+}
+
+.legal-card__feedback[data-tone="warning"] {
+  border-color: #f2a600;
+  color: #b47300;
+  background: #fff8e6;
+}
+
+.legal-card__feedback[data-tone="success"] {
+  border-color: #22863a;
+  color: #1b6a2d;
+  background: #edf9f1;
+}
+
+.legal-card__hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legal-form .form-field {
+  margin-bottom: 8px;
+}
+
+.legal-form .form-actions {
+  margin-top: 4px;
+}
+
 .app.is-sidebar-collapsed {
   grid-template-columns: 64px 1fr;
 }

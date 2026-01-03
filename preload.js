@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("artifacts:save", caseId, artifactData),
   captureArtifact: (caseId, subjectId) =>
     ipcRenderer.invoke("artifacts:capture", caseId, subjectId),
+  listLegalMarks: () => ipcRenderer.invoke("legal-marks:list"),
+  setArtifactLegal: (artifactId, payload) =>
+    ipcRenderer.invoke("artifacts:set-legal", artifactId, payload),
   updateLegalMarks: (caseId, marks) =>
     ipcRenderer.invoke("cases:update-legal-marks", caseId, marks),
   browserNavigate: (url) => ipcRenderer.invoke("browser:navigate", url),

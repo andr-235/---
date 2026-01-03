@@ -297,7 +297,40 @@ function mapArtifactRow(row, baseDir) {
     screenshotFileUrl: toFileUrl(screenshotPath),
     htmlFileUrl: toFileUrl(htmlPath),
     textFileUrl: toFileUrl(textPath),
+    legalMarkId:
+      Number.isInteger(Number(row.legal_mark_id)) &&
+      Number(row.legal_mark_id) > 0
+        ? Number(row.legal_mark_id)
+        : null,
+    legalMarkLabel: row.legal_mark_label || null,
+    articleText: row.article_text || null,
+    legalComment: row.legal_comment || row.comment || null,
   };
+}
+
+function selectArtifactRowWithLegal(db, artifactId) {
+  return db
+    .prepare(
+      `SELECT a.id,
+              a.case_id,
+              a.subject_id,
+              a.source,
+              a.url,
+              a.title,
+              a.captured_at,
+              a.screenshot_path,
+              a.html_path,
+              a.text_path,
+              alm.legal_mark_id,
+              alm.article_text,
+              alm.comment AS legal_comment,
+              lm.label AS legal_mark_label
+       FROM artifacts AS a
+       LEFT JOIN artifact_legal_marks AS alm ON alm.artifact_id = a.id
+       LEFT JOIN legal_marks AS lm ON lm.id = alm.legal_mark_id
+       WHERE a.id = ?`
+    )
+    .get(artifactId);
 }
 
 function getStoredFileSize(baseDir, relativePath) {
@@ -666,6 +699,32 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "legal-marks:list",
+  wrapIpc("legal-marks:list", async () => {
+    try {
+      const db = getDb();
+      const rows = db
+        .prepare(
+          `SELECT id, label, description
+           FROM legal_marks
+           ORDER BY label ASC, id ASC`
+        )
+        .all();
+      return ok(
+        rows.map((row) => ({
+          id: row.id,
+          label: row.label,
+          description: row.description || null,
+        }))
+      );
+    } catch (error) {
+      console.error("[DB] listLegalMarks failed:", error);
+      return fail("DB_ERROR", "Не удалось загрузить список юридических меток.");
+    }
+  })
+);
+
+ipcMain.handle(
   "cases:create",
   wrapIpc("cases:create", async (caseData) => {
     if (!isPlainObject(caseData)) {
@@ -754,11 +813,25 @@ ipcMain.handle(
       const baseDir = getArtifactsBaseDir();
       const rows = db
         .prepare(
-          `SELECT id, case_id, subject_id, source, url, title, captured_at,
-                  screenshot_path, html_path, text_path
-           FROM artifacts
-           WHERE case_id = ?
-           ORDER BY captured_at DESC, id DESC`
+          `SELECT a.id,
+                  a.case_id,
+                  a.subject_id,
+                  a.source,
+                  a.url,
+                  a.title,
+                  a.captured_at,
+                  a.screenshot_path,
+                  a.html_path,
+                  a.text_path,
+                  alm.legal_mark_id,
+                  alm.article_text,
+                  alm.comment AS legal_comment,
+                  lm.label AS legal_mark_label
+           FROM artifacts AS a
+           LEFT JOIN artifact_legal_marks AS alm ON alm.artifact_id = a.id
+           LEFT JOIN legal_marks AS lm ON lm.id = alm.legal_mark_id
+           WHERE a.case_id = ?
+           ORDER BY a.captured_at DESC, a.id DESC`
         )
         .all(id);
       return ok(rows.map((row) => mapArtifactRow(row, baseDir)));
@@ -1076,15 +1149,11 @@ ipcMain.handle(
           metaResult.value
         );
 
-      const row = db
-        .prepare(
-          `SELECT id, case_id, subject_id, source, url, title, captured_at,
-                  screenshot_path, html_path, text_path
-           FROM artifacts
-           WHERE id = ?`
-        )
-        .get(result.lastInsertRowid);
-      return ok(mapArtifactRow(row, baseDir));
+      const mappedRow = selectArtifactRowWithLegal(
+        db,
+        result.lastInsertRowid
+      );
+      return ok(mapArtifactRow(mappedRow, baseDir));
     } catch (error) {
       console.error("[DB] saveArtifact failed:", error);
       await cleanupFiles(baseDir, createdFiles);
@@ -1322,17 +1391,13 @@ ipcMain.handle(
           null
         );
 
-      const row = db
-        .prepare(
-          `SELECT id, case_id, subject_id, source, url, title, captured_at,
-                  screenshot_path, html_path, text_path
-           FROM artifacts
-           WHERE id = ?`
-        )
-        .get(result.lastInsertRowid);
+      const mappedRow = selectArtifactRowWithLegal(
+        db,
+        result.lastInsertRowid
+      );
 
       return ok({
-        artifact: mapArtifactRow(row, baseDir),
+        artifact: mapArtifactRow(mappedRow, baseDir),
         warnings,
         partial: warnings.length > 0,
       });
@@ -1340,6 +1405,83 @@ ipcMain.handle(
       console.error("[DB] captureArtifact failed:", error);
       await cleanupFiles(baseDir, createdFiles);
       return fail("DB_ERROR", "Не удалось сохранить артефакт.");
+    }
+  })
+);
+
+ipcMain.handle(
+  "artifacts:set-legal",
+  wrapIpc("artifacts:set-legal", async (artifactId, payload) => {
+    const id = parsePositiveInt(artifactId);
+    if (!id) {
+      return fail(
+        "INVALID_ARGUMENT",
+        "artifactId должен быть положительным целым числом."
+      );
+    }
+    if (!isPlainObject(payload)) {
+      return fail("INVALID_ARGUMENT", "payload должно быть объектом.");
+    }
+    const legalMarkId = parsePositiveInt(payload.legalMarkId);
+    if (!legalMarkId) {
+      return fail(
+        "INVALID_ARGUMENT",
+        "legalMarkId обязателен и должен быть положительным целым числом."
+      );
+    }
+    const articleResult = validateRequiredString(
+      payload.articleText,
+      "articleText",
+      MAX_LEGAL_TEXT_LENGTH
+    );
+    if (!articleResult.ok) {
+      return fail("INVALID_ARGUMENT", articleResult.error);
+    }
+    const commentResult = validateOptionalString(
+      payload.comment,
+      "comment",
+      MAX_COMMENT_LENGTH
+    );
+    if (!commentResult.ok) {
+      return fail("INVALID_ARGUMENT", commentResult.error);
+    }
+
+    try {
+      const db = getDb();
+      const artifactRow = db
+        .prepare("SELECT id FROM artifacts WHERE id = ?")
+        .get(id);
+      if (!artifactRow) {
+        return fail("NOT_FOUND", "Артефакт не найден.");
+      }
+
+      const markRow = db
+        .prepare("SELECT id, label FROM legal_marks WHERE id = ?")
+        .get(legalMarkId);
+      if (!markRow) {
+        return fail(
+          "INVALID_ARGUMENT",
+          "Выбранная юридическая метка отсутствует в справочнике."
+        );
+      }
+
+      db.prepare(
+        `INSERT INTO artifact_legal_marks (
+           artifact_id, legal_mark_id, article_text, comment, created_at
+         ) VALUES (?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(artifact_id) DO UPDATE SET
+           legal_mark_id = excluded.legal_mark_id,
+           article_text = excluded.article_text,
+           comment = excluded.comment,
+           updated_at = datetime('now')`
+      ).run(id, legalMarkId, articleResult.value, commentResult.value);
+
+      const baseDir = getArtifactsBaseDir();
+      const mappedRow = selectArtifactRowWithLegal(db, id);
+      return ok(mapArtifactRow(mappedRow, baseDir));
+    } catch (error) {
+      console.error("[DB] setArtifactLegal failed:", error);
+      return fail("DB_ERROR", "Не удалось сохранить юридическую привязку.");
     }
   })
 );
@@ -1377,15 +1519,18 @@ ipcMain.handle(
           `marks[${index}].artifactId должен быть положительным целым числом.`
         );
       }
-      const labelResult = validateRequiredString(
-        mark.label,
-        `marks[${index}].label`,
-        MAX_LABEL_LENGTH
-      );
+      const resolvedMarkId = parsePositiveInt(mark.legalMarkId);
+      const labelResult = resolvedMarkId
+        ? { ok: true, value: null }
+        : validateRequiredString(
+            mark.label,
+            `marks[${index}].label`,
+            MAX_LABEL_LENGTH
+          );
       if (!labelResult.ok) {
         return fail("INVALID_ARGUMENT", labelResult.error);
       }
-      const articleResult = validateOptionalString(
+      const articleResult = validateRequiredString(
         mark.articleText,
         `marks[${index}].articleText`,
         MAX_LEGAL_TEXT_LENGTH
@@ -1403,6 +1548,7 @@ ipcMain.handle(
       }
       normalizedMarks.push({
         artifactId,
+        legalMarkId: resolvedMarkId,
         label: labelResult.value,
         articleText: articleResult.value,
         comment: commentResult.value,
@@ -1430,22 +1576,57 @@ ipcMain.handle(
           );
         }
       }
+      for (const mark of normalizedMarks) {
+        if (mark.legalMarkId) {
+          const exists = db
+            .prepare("SELECT id FROM legal_marks WHERE id = ?")
+            .get(mark.legalMarkId);
+          if (!exists) {
+            return fail(
+              "INVALID_ARGUMENT",
+              `marks[${normalizedMarks.indexOf(mark)}].legalMarkId не найден.`
+            );
+          }
+        }
+      }
 
       const deleteStmt = db.prepare(
-        `DELETE FROM legal_marks
+        `DELETE FROM artifact_legal_marks
          WHERE artifact_id IN (SELECT id FROM artifacts WHERE case_id = ?)`
       );
-      const insertStmt = db.prepare(
-        `INSERT INTO legal_marks (artifact_id, label, article_text, comment)
-         VALUES (?, ?, ?, ?)`
+      const insertMarkStmt = db.prepare(
+        `INSERT OR IGNORE INTO legal_marks (label, created_at)
+         VALUES (?, datetime('now'))`
+      );
+      const selectMarkByLabelStmt = db.prepare(
+        "SELECT id FROM legal_marks WHERE label = ?"
+      );
+      const upsertLinkStmt = db.prepare(
+        `INSERT INTO artifact_legal_marks (
+           artifact_id, legal_mark_id, article_text, comment, created_at
+         ) VALUES (?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(artifact_id) DO UPDATE SET
+           legal_mark_id = excluded.legal_mark_id,
+           article_text = excluded.article_text,
+           comment = excluded.comment,
+           updated_at = datetime('now')`
       );
 
       const transaction = db.transaction(() => {
         deleteStmt.run(id);
         for (const mark of normalizedMarks) {
-          insertStmt.run(
+          let legalMarkId = mark.legalMarkId;
+          if (!legalMarkId && mark.label) {
+            insertMarkStmt.run(mark.label);
+            const found = selectMarkByLabelStmt.get(mark.label);
+            legalMarkId = found ? found.id : null;
+          }
+          if (!legalMarkId) {
+            throw new Error("LEGAL_MARK_NOT_FOUND");
+          }
+          upsertLinkStmt.run(
             mark.artifactId,
-            mark.label,
+            legalMarkId,
             mark.articleText,
             mark.comment
           );
@@ -1456,6 +1637,12 @@ ipcMain.handle(
       return ok({ updated: normalizedMarks.length });
     } catch (error) {
       console.error("[DB] updateLegalMarks failed:", error);
+      if (error && error.message === "LEGAL_MARK_NOT_FOUND") {
+        return fail(
+          "INVALID_ARGUMENT",
+          "Не удалось привязать метку: она отсутствует в справочнике."
+        );
+      }
       return fail("DB_ERROR", "Не удалось обновить правовые метки.");
     }
   })
