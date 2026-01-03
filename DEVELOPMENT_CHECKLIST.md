@@ -14,9 +14,9 @@
 
 ### Шаг 3. IPC и API
 
-- [ ] В `preload.js` реализовать `window.api` с методами:
+- [+] В `preload.js` реализовать `window.api` с методами:
   - `getCases`, `createCase`, `getCaseArtifacts`, `saveArtifact`, `updateLegalMarks` и т.п.
-- [ ] В `main.js` реализовать `ipcMain.handle(...)`:
+- [+] В `main.js` реализовать `ipcMain.handle(...)`:
   - каждый метод обращается к SQLite и/или файловой системе.
 
 ### Шаг 4. Встроенный браузер
