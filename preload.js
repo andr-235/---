@@ -10,4 +10,16 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("artifacts:save", caseId, artifactData),
   updateLegalMarks: (caseId, marks) =>
     ipcRenderer.invoke("cases:update-legal-marks", caseId, marks),
+  browserNavigate: (url) => ipcRenderer.invoke("browser:navigate", url),
+  setBrowserBounds: (bounds) => ipcRenderer.send("browser:set-bounds", bounds),
+  setBrowserVisible: (visible) =>
+    ipcRenderer.send("browser:set-visible", visible),
+  onBrowserState: (callback) => {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("browser:state", listener);
+    return () => ipcRenderer.removeListener("browser:state", listener);
+  },
 });

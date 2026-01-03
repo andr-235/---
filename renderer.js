@@ -3,7 +3,7 @@ const quickLinks = [
   { id: "ok", label: "Одноклассники", url: "https://ok.ru" },
   { id: "telegram", label: "Telegram", url: "https://web.telegram.org" },
   { id: "whatsapp", label: "WhatsApp", url: "https://web.whatsapp.com" },
-  { id: "max", label: "Max", url: "https://max.com" },
+  { id: "max", label: "Max", url: "https://web.max.ru/" },
   { id: "news", label: "Новости", url: "https://news.google.com" },
 ];
 
@@ -251,7 +251,10 @@ function syncQuickLinkWithUrl(url) {
 }
 
 function navigateTo(url, linkId) {
-  if (!elements.browserView) return;
+  if (!window.api || typeof window.api.browserNavigate !== "function") {
+    showBrowserError("Браузер недоступен.");
+    return;
+  }
   lastUrl = url;
   hideBrowserError();
   setStatus("Загрузка");
@@ -260,11 +263,21 @@ function navigateTo(url, linkId) {
     setActiveQuickLink(linkId);
   }
 
-  const result = elements.browserView.loadURL(url);
-  if (result && typeof result.catch === "function") {
-    result.catch(() => {
-      showBrowserError(`Не удалось перейти на ${url}`);
-    });
+  const result = window.api.browserNavigate(url);
+  if (result && typeof result.then === "function") {
+    result
+      .then((response) => {
+        if (!response || !response.ok) {
+          const message =
+            response && response.error && response.error.message
+              ? response.error.message
+              : `Не удалось перейти на ${url}`;
+          showBrowserError(message);
+        }
+      })
+      .catch(() => {
+        showBrowserError(`Не удалось перейти на ${url}`);
+      });
   }
 }
 
@@ -283,39 +296,84 @@ function initQuickNav() {
   setActiveQuickLink("vk");
 }
 
-function initBrowserEvents() {
-  if (!elements.browserView) return;
-  elements.browserView.addEventListener("did-start-loading", () => {
-    setStatus("Загрузка");
+function isBrowserTabActive() {
+  return elements.views.browser.classList.contains("view--active");
+}
+
+function updateBrowserBounds() {
+  if (
+    !elements.browserView ||
+    !window.api ||
+    typeof window.api.setBrowserBounds !== "function" ||
+    typeof window.api.setBrowserVisible !== "function"
+  ) {
+    return;
+  }
+
+  const visible = isBrowserTabActive();
+  window.api.setBrowserVisible(visible);
+  if (!visible) {
+    return;
+  }
+
+  const rect = elements.browserView.getBoundingClientRect();
+  const x = rect.left + elements.browserView.clientLeft;
+  const y = rect.top + elements.browserView.clientTop;
+  const width = elements.browserView.clientWidth;
+  const height = elements.browserView.clientHeight;
+
+  window.api.setBrowserBounds({
+    x,
+    y,
+    width,
+    height,
   });
-  elements.browserView.addEventListener("did-stop-loading", () => {
-    setStatus("Готово");
-    hideBrowserError();
-    const url = elements.browserView.getURL();
-    lastUrl = url || lastUrl;
-    setCurrentUrl(url);
-    syncQuickLinkWithUrl(url);
-  });
-  elements.browserView.addEventListener("did-navigate", (event) => {
-    lastUrl = event.url;
-    setCurrentUrl(event.url);
-    syncQuickLinkWithUrl(event.url);
-  });
-  elements.browserView.addEventListener("did-navigate-in-page", (event) => {
-    lastUrl = event.url;
-    setCurrentUrl(event.url);
-    syncQuickLinkWithUrl(event.url);
-  });
-  const onFail = (event) => {
-    if (event.errorCode === -3) {
+}
+
+function initBrowserBridge() {
+  if (!window.api || typeof window.api.onBrowserState !== "function") {
+    showBrowserError("IPC браузера недоступен.");
+    return;
+  }
+
+  window.api.onBrowserState((state) => {
+    if (!state) {
       return;
     }
-    const description = event.errorDescription || "Ошибка загрузки.";
-    const message = `${description} (${event.errorCode})`;
-    showBrowserError(message);
-  };
-  elements.browserView.addEventListener("did-fail-load", onFail);
-  elements.browserView.addEventListener("did-fail-provisional-load", onFail);
+    if (state.status === "loading") {
+      setStatus("Загрузка");
+    } else if (state.status === "ready") {
+      setStatus("Готово");
+    } else if (state.status === "error") {
+      setStatus("Ошибка");
+    }
+
+    if (state.clearError) {
+      hideBrowserError();
+    }
+
+    if (state.error) {
+      showBrowserError(state.error.message || "Ошибка загрузки.");
+    }
+
+    if (state.url !== undefined) {
+      lastUrl = state.url || lastUrl;
+      setCurrentUrl(state.url);
+      syncQuickLinkWithUrl(state.url);
+    }
+  });
+}
+
+function initBrowserViewport() {
+  if (!elements.browserView) {
+    return;
+  }
+  const observer = new ResizeObserver(() => {
+    updateBrowserBounds();
+  });
+  observer.observe(elements.browserView);
+  window.addEventListener("resize", updateBrowserBounds);
+  updateBrowserBounds();
 }
 
 function initTabs() {
@@ -331,6 +389,7 @@ function initTabs() {
           view.classList.remove("view--active");
         }
       });
+      updateBrowserBounds();
     });
   });
 }
@@ -388,7 +447,9 @@ store.subscribe((state) => {
 });
 
 initQuickNav();
-initBrowserEvents();
+initBrowserBridge();
+initBrowserViewport();
 initTabs();
 bindEvents();
 loadCases();
+navigateTo(lastUrl, "vk");

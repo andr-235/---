@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src https:; child-src https:; webview-src https:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src https:; child-src https:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Центр расследований ОСИНТ</title>
@@ -71,12 +71,11 @@
                 Повторить
               </button>
             </div>
-            <webview
+            <div
               id="browserView"
-              src="https://vk.com"
-              partition="persist:osint"
-              webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes"
-            ></webview>
+              class="browser-viewport"
+              aria-label="Встроенный браузер"
+            ></div>
           </div>
         </section>
         <section class="view" id="view-case">
