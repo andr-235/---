@@ -90,10 +90,10 @@ function initDb() {
 
     return db;
   } catch (err) {
-    console.error("[DB] init failed:", err);
+    console.error("[DB] инициализация не удалась:", err);
     dialog.showErrorBox(
-      "Database initialization failed",
-      `Unable to open or initialize the database.\n\n${err.message}`
+      "Ошибка инициализации базы данных",
+      `Не удалось открыть или инициализировать базу данных.\n\n${err.message}`
     );
     // Завершение, чтобы не работать в неконсистентном состоянии.
     app.exit(1);
@@ -102,7 +102,9 @@ function initDb() {
 
 function getDb() {
   if (!db) {
-    throw new Error("DB not initialized. Call initDb() after app.whenReady().");
+    throw new Error(
+      "База данных не инициализирована. Вызовите initDb() после app.whenReady()."
+    );
   }
   return db;
 }
@@ -111,7 +113,7 @@ function closeDb() {
   try {
     if (db) db.close();
   } catch (err) {
-    console.warn("[DB] close failed:", err);
+    console.warn("[DB] закрытие не удалось:", err);
   }
 }
 

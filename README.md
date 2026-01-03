@@ -1,9 +1,9 @@
 ````markdown
-# OSINT Case Center — Developer Guide
+# Центр расследований ОСИНТ - руководство разработчика
 
-## 1. Project Overview
+## 1. Обзор проекта
 
-**OSINT Case Center** — это простое настольное приложение на Electron для работы с OSINT-кейсами. Оно позволяет:
+**Центр расследований ОСИНТ** - это простое настольное приложение на Electron для работы с OSINT-кейсами. Оно позволяет:
 
 - создавать кейсы,
 - просматривать сайты и соцсети во встроенном браузере,
@@ -18,7 +18,7 @@
 
 ---
 
-## 2. Getting Started: Environment Setup
+## 2. Начало работы: настройка окружения
 
 ### 2.1. Что нужно установить
 
@@ -126,12 +126,12 @@ npm run electron
 
 ---
 
-## 4. Technology Stack (минимум)
+## 4. Стек технологий (минимум)
 
 - **Electron** — десктоп
 - **SQLite** — локальная БД
 - **better-sqlite3** — простой доступ к БД
-- **React (опционально)** — UI
+- **React (опционально)** - интерфейс
 
 Ничего лишнего.
 
@@ -141,25 +141,25 @@ npm run electron
 
 ### Процессы
 
-- **Main**
+- **Главный процесс (Main)**
 
   - База данных
   - Файлы
   - Скриншоты
 
-- **Renderer**
+- **Процесс рендеринга (Renderer)**
 
   - Интерфейс
   - Кнопки, формы
 
-- **Preload**
+- **Preload (предзагрузка)**
 
-  - Передаёт команды от UI в Main
+  - Передаёт команды от интерфейса в Main
 
 Схема:
 
 ```
-UI → Preload → Main → Disk
+Интерфейс -> Preload -> Main -> Диск
 ```
 
 ---
@@ -199,7 +199,7 @@ CREATE TABLE artifacts (
 ### Создание кейса
 
 1. Пользователь вводит название
-2. UI вызывает `saveCase`
+2. Интерфейс вызывает `saveCase`
 3. Запись в SQLite
 4. Создаётся папка кейса
 
@@ -208,7 +208,7 @@ CREATE TABLE artifacts (
 ### Захват артефакта
 
 1. Пользователь нажимает «Скриншот»
-2. Electron делает screenshot
+2. Electron делает скриншот
 3. Файл сохраняется
 4. В БД добавляется запись
 
@@ -218,13 +218,13 @@ CREATE TABLE artifacts (
 
 ### `saveCase`
 
-**Renderer**
+**Renderer (интерфейс)**
 
 ```js
 window.api.saveCase({ title, description });
 ```
 
-**Main**
+**Main (главный процесс)**
 
 ```js
 ipcMain.handle("saveCase", (_, data) => {
@@ -248,7 +248,7 @@ ipcMain.handle("saveCase", (_, data) => {
 
 ## 9. Безопасность (без фанатизма)
 
-### Включить isolation
+### Включить contextIsolation
 
 ```js
 new BrowserWindow({
@@ -259,7 +259,7 @@ new BrowserWindow({
 });
 ```
 
-### Preload
+### Preload (предзагрузка)
 
 ```js
 contextBridge.exposeInMainWorld("api", {
@@ -295,7 +295,7 @@ osint-case-center/
 1. Electron окно
 2. SQLite + db.js
 3. IPC (`saveCase`)
-4. UI кейсов
+4. Интерфейс кейсов
 5. BrowserView
 6. Скриншоты
 7. Экспорт отчёта
@@ -354,7 +354,7 @@ try {
 
 - без микросервисов,
 - без лишних абстракций,
-- без overengineering.
+- без оверинжиниринга.
 
 Сначала **рабочий продукт**, потом улучшения.
 

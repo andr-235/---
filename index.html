@@ -1,15 +1,108 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self';"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src https:; child-src https:; webview-src https:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OSINT Case Center</title>
+    <title>Центр расследований ОСИНТ</title>
+    <link rel="stylesheet" href="./renderer.css" />
   </head>
   <body>
-    <h1>OSINT Case Center</h1>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar__header">
+          <div>
+            <div class="app-title">Центр расследований ОСИНТ</div>
+            <div class="app-subtitle">Локальное рабочее пространство</div>
+          </div>
+          <button class="ghost-btn" id="refreshCases" type="button">
+            Обновить
+          </button>
+        </div>
+        <div class="sidebar__section">
+          <div class="section-title">Дела</div>
+          <div class="case-list" id="caseList"></div>
+          <div class="empty-state" id="caseEmpty" hidden>
+            Пока нет дел.
+          </div>
+        </div>
+        <div class="sidebar__footer">
+          <button class="outline-btn" id="clearSelection" type="button">
+            Снять выбор
+          </button>
+        </div>
+      </aside>
+      <main class="workspace">
+        <header class="workspace__header">
+          <div class="case-summary">
+            <div class="label">Активное дело</div>
+            <div class="value" id="caseSummary">Не выбрано</div>
+          </div>
+          <div class="tab-bar" role="tablist">
+            <button class="tab is-active" data-view="browser" type="button">
+              Браузер
+            </button>
+            <button class="tab" data-view="case" type="button">
+              Дело
+            </button>
+          </div>
+        </header>
+        <section class="view view--active" id="view-browser">
+          <div class="quick-nav" id="quickNav"></div>
+          <div class="browser-meta">
+            <div class="browser-meta__left">
+              <span class="meta-label">Адрес</span>
+              <span class="meta-value" id="currentUrl">about:blank</span>
+            </div>
+            <div class="browser-meta__right">
+              <span class="status-pill" id="browserStatus">Ожидание</span>
+            </div>
+          </div>
+          <div class="browser-container">
+            <div class="browser-error" id="browserError" hidden>
+              <div class="browser-error__title">
+                Не удалось загрузить страницу
+              </div>
+              <div class="browser-error__message" id="browserErrorMessage"></div>
+              <button class="outline-btn" id="retryLoad" type="button">
+                Повторить
+              </button>
+            </div>
+            <webview
+              id="browserView"
+              src="https://vk.com"
+              partition="persist:osint"
+              webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes"
+            ></webview>
+          </div>
+        </section>
+        <section class="view" id="view-case">
+          <div class="case-panel">
+            <div class="case-panel__header">
+              <div class="panel-title">Обзор дела</div>
+              <div class="panel-subtitle">
+                Состояние синхронизируется между вкладками.
+              </div>
+            </div>
+            <div class="case-panel__body" id="caseDetails"></div>
+          </div>
+          <div class="case-panel">
+            <div class="case-panel__header">
+              <div class="panel-title">Заметки</div>
+              <div class="panel-subtitle">
+                Зарезервировано для заметок и тегов.
+              </div>
+            </div>
+            <div class="case-panel__body">
+              <div class="placeholder">Пока нет заметок.</div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="./renderer.js"></script>
   </body>
 </html>

@@ -37,7 +37,7 @@ function wrapIpc(channel, handler) {
       return await handler(...args);
     } catch (error) {
       console.error(`[IPC] ${channel} failed:`, error);
-      return fail("INTERNAL_ERROR", "Unexpected error.");
+      return fail("INTERNAL_ERROR", "Неожиданная ошибка.");
     }
   };
 }
@@ -57,14 +57,17 @@ function parsePositiveInt(value) {
 
 function validateRequiredString(value, fieldName, maxLength) {
   if (typeof value !== "string") {
-    return { ok: false, error: `${fieldName} must be a string.` };
+    return { ok: false, error: `${fieldName} должно быть строкой.` };
   }
   const trimmed = value.trim();
   if (!trimmed) {
-    return { ok: false, error: `${fieldName} is required.` };
+    return { ok: false, error: `${fieldName} обязательно.` };
   }
   if (trimmed.length > maxLength) {
-    return { ok: false, error: `${fieldName} is too long.` };
+    return {
+      ok: false,
+      error: `${fieldName} превышает максимальную длину.`,
+    };
   }
   return { ok: true, value: trimmed };
 }
@@ -74,14 +77,17 @@ function validateOptionalString(value, fieldName, maxLength) {
     return { ok: true, value: null };
   }
   if (typeof value !== "string") {
-    return { ok: false, error: `${fieldName} must be a string.` };
+    return { ok: false, error: `${fieldName} должно быть строкой.` };
   }
   const trimmed = value.trim();
   if (!trimmed) {
     return { ok: true, value: null };
   }
   if (trimmed.length > maxLength) {
-    return { ok: false, error: `${fieldName} is too long.` };
+    return {
+      ok: false,
+      error: `${fieldName} превышает максимальную длину.`,
+    };
   }
   return { ok: true, value: trimmed };
 }
@@ -91,11 +97,14 @@ function normalizeCapturedAt(value) {
     return { ok: true, value: null };
   }
   if (typeof value !== "string") {
-    return { ok: false, error: "capturedAt must be a string." };
+    return { ok: false, error: "capturedAt должно быть строкой." };
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return { ok: false, error: "capturedAt must be a valid date string." };
+    return {
+      ok: false,
+      error: "capturedAt должно быть корректной строкой даты.",
+    };
   }
   return { ok: true, value: date.toISOString() };
 }
@@ -110,21 +119,24 @@ function normalizeMetaJson(meta) {
       return { ok: true, value: null };
     }
     if (trimmed.length > MAX_META_LENGTH) {
-      return { ok: false, error: "meta is too large." };
+      return { ok: false, error: "meta превышает допустимый размер." };
     }
     return { ok: true, value: trimmed };
   }
   if (!isPlainObject(meta)) {
-    return { ok: false, error: "meta must be an object or string." };
+    return { ok: false, error: "meta должно быть объектом или строкой." };
   }
   try {
     const json = JSON.stringify(meta);
     if (json.length > MAX_META_LENGTH) {
-      return { ok: false, error: "meta is too large." };
+      return { ok: false, error: "meta превышает допустимый размер." };
     }
     return { ok: true, value: json };
   } catch (error) {
-    return { ok: false, error: "meta must be JSON-serializable." };
+    return {
+      ok: false,
+      error: "meta должно быть сериализуемым в JSON.",
+    };
   }
 }
 
@@ -136,11 +148,11 @@ function normalizeFilePayload(file, defaultEncoding) {
     return { ok: true, value: { data: file, encoding: defaultEncoding } };
   }
   if (!isPlainObject(file) || typeof file.data !== "string") {
-    return { ok: false, error: "Invalid file payload." };
+    return { ok: false, error: "Некорректные данные файла." };
   }
   const encoding = file.encoding || defaultEncoding;
   if (!ALLOWED_ENCODINGS.has(encoding)) {
-    return { ok: false, error: "Invalid file encoding." };
+    return { ok: false, error: "Некорректная кодировка файла." };
   }
   return { ok: true, value: { data: file.data, encoding } };
 }
@@ -156,7 +168,7 @@ function safeJoin(baseDir, ...segments) {
   const resolvedTarget = path.resolve(baseDir, ...segments);
   const relative = path.relative(resolvedBase, resolvedTarget);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("Unsafe path.");
+    throw new Error("Недопустимый путь.");
   }
   return resolvedTarget;
 }
@@ -188,10 +200,10 @@ async function writeArtifactFile({
       : Buffer.from(payload.data, "utf8");
 
   if (buffer.length === 0) {
-    throw new Error("Empty file payload.");
+    throw new Error("Пустые данные файла.");
   }
   if (buffer.length > maxBytes) {
-    throw new Error("File too large.");
+    throw new Error("Файл слишком большой.");
   }
 
   const randomSuffix = crypto.randomBytes(6).toString("hex");
@@ -208,7 +220,7 @@ async function cleanupFiles(baseDir, paths) {
         const absolutePath = safeJoin(baseDir, relativePath);
         await fs.promises.unlink(absolutePath);
       } catch (error) {
-        console.warn("[FS] cleanup failed:", error);
+        console.warn("[FS] очистка не удалась:", error);
       }
     })
   );
@@ -249,6 +261,7 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webviewTag: true,
       preload: path.join(__dirname, "preload.js"),
     },
   });
@@ -258,11 +271,11 @@ function createMainWindow() {
   const startUrl = process.env.ELECTRON_START_URL;
   if (startUrl) {
     mainWindow.loadURL(startUrl).catch((error) => {
-      console.error("Failed to load URL:", error);
+      console.error("Не удалось загрузить URL:", error);
     });
   } else {
     mainWindow.loadFile(path.join(__dirname, "index.html")).catch((error) => {
-      console.error("Failed to load index.html:", error);
+      console.error("Не удалось загрузить index.html:", error);
     });
   }
 
@@ -288,7 +301,7 @@ ipcMain.handle(
       return ok(rows.map(mapCaseRow));
     } catch (error) {
       console.error("[DB] getCases failed:", error);
-      return fail("DB_ERROR", "Unable to load cases.");
+      return fail("DB_ERROR", "Не удалось загрузить дела.");
     }
   })
 );
@@ -297,7 +310,7 @@ ipcMain.handle(
   "cases:create",
   wrapIpc("cases:create", async (caseData) => {
     if (!isPlainObject(caseData)) {
-      return fail("INVALID_ARGUMENT", "caseData must be an object.");
+      return fail("INVALID_ARGUMENT", "caseData должно быть объектом.");
     }
     const titleResult = validateRequiredString(
       caseData.title,
@@ -321,7 +334,7 @@ ipcMain.handle(
     if (!ALLOWED_STATUSES.has(status)) {
       return fail(
         "INVALID_ARGUMENT",
-        `status must be one of: ${Array.from(ALLOWED_STATUSES).join(", ")}.`
+        `status должен быть одним из: ${Array.from(ALLOWED_STATUSES).join(", ")}.`
       );
     }
 
@@ -343,7 +356,7 @@ ipcMain.handle(
       return ok(mapCaseRow(row));
     } catch (error) {
       console.error("[DB] createCase failed:", error);
-      return fail("DB_ERROR", "Unable to create case.");
+      return fail("DB_ERROR", "Не удалось создать дело.");
     }
   })
 );
@@ -353,7 +366,10 @@ ipcMain.handle(
   wrapIpc("cases:get-artifacts", async (caseId) => {
     const id = parsePositiveInt(caseId);
     if (!id) {
-      return fail("INVALID_ARGUMENT", "caseId must be a positive integer.");
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
     }
     try {
       const db = getDb();
@@ -361,7 +377,7 @@ ipcMain.handle(
         .prepare("SELECT id FROM cases WHERE id = ?")
         .get(id);
       if (!exists) {
-        return fail("NOT_FOUND", "Case not found.");
+        return fail("NOT_FOUND", "Дело не найдено.");
       }
       const baseDir = getArtifactsBaseDir();
       const rows = db
@@ -376,7 +392,7 @@ ipcMain.handle(
       return ok(rows.map((row) => mapArtifactRow(row, baseDir)));
     } catch (error) {
       console.error("[DB] getCaseArtifacts failed:", error);
-      return fail("DB_ERROR", "Unable to load artifacts.");
+      return fail("DB_ERROR", "Не удалось загрузить артефакты.");
     }
   })
 );
@@ -386,10 +402,13 @@ ipcMain.handle(
   wrapIpc("artifacts:save", async (caseId, artifactData) => {
     const id = parsePositiveInt(caseId);
     if (!id) {
-      return fail("INVALID_ARGUMENT", "caseId must be a positive integer.");
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
     }
     if (!isPlainObject(artifactData)) {
-      return fail("INVALID_ARGUMENT", "artifactData must be an object.");
+      return fail("INVALID_ARGUMENT", "artifactData должно быть объектом.");
     }
 
     const urlResult = validateRequiredString(
@@ -431,7 +450,10 @@ ipcMain.handle(
     if (artifactData.subjectId !== undefined && artifactData.subjectId !== null) {
       subjectId = parsePositiveInt(artifactData.subjectId);
       if (!subjectId) {
-        return fail("INVALID_ARGUMENT", "subjectId must be a positive integer.");
+        return fail(
+          "INVALID_ARGUMENT",
+          "subjectId должен быть положительным целым числом."
+        );
       }
     }
 
@@ -447,7 +469,10 @@ ipcMain.handle(
       screenshotResult.value &&
       screenshotResult.value.encoding !== "base64"
     ) {
-      return fail("INVALID_ARGUMENT", "screenshot must be base64 encoded.");
+      return fail(
+        "INVALID_ARGUMENT",
+        "screenshot должен быть в кодировке base64."
+      );
     }
     const htmlResult = normalizeFilePayload(files.html, "utf8");
     if (!htmlResult.ok) {
@@ -465,7 +490,7 @@ ipcMain.handle(
         .prepare("SELECT id FROM cases WHERE id = ?")
         .get(id);
       if (!caseExists) {
-        return fail("NOT_FOUND", "Case not found.");
+        return fail("NOT_FOUND", "Дело не найдено.");
       }
       if (subjectId) {
         const subjectExists = db
@@ -474,12 +499,15 @@ ipcMain.handle(
           )
           .get(subjectId, id);
         if (!subjectExists) {
-          return fail("INVALID_ARGUMENT", "subjectId does not belong to case.");
+          return fail(
+            "INVALID_ARGUMENT",
+            "subjectId не относится к этому делу."
+          );
         }
       }
     } catch (error) {
       console.error("[DB] validate case failed:", error);
-      return fail("DB_ERROR", "Unable to validate case data.");
+      return fail("DB_ERROR", "Не удалось проверить данные дела.");
     }
 
     const baseDir = getArtifactsBaseDir();
@@ -489,7 +517,10 @@ ipcMain.handle(
       await fs.promises.mkdir(caseDir, { recursive: true });
     } catch (error) {
       console.error("[FS] mkdir failed:", error);
-      return fail("FILE_ERROR", "Unable to prepare artifact storage.");
+      return fail(
+        "FILE_ERROR",
+        "Не удалось подготовить хранилище артефактов."
+      );
     }
 
     const createdFiles = [];
@@ -534,7 +565,7 @@ ipcMain.handle(
     } catch (error) {
       console.error("[FS] write failed:", error);
       await cleanupFiles(baseDir, createdFiles);
-      return fail("FILE_ERROR", "Unable to write artifact files.");
+      return fail("FILE_ERROR", "Не удалось записать файлы артефактов.");
     }
 
     try {
@@ -581,7 +612,7 @@ ipcMain.handle(
     } catch (error) {
       console.error("[DB] saveArtifact failed:", error);
       await cleanupFiles(baseDir, createdFiles);
-      return fail("DB_ERROR", "Unable to save artifact.");
+      return fail("DB_ERROR", "Не удалось сохранить артефакт.");
     }
   })
 );
@@ -591,13 +622,16 @@ ipcMain.handle(
   wrapIpc("cases:update-legal-marks", async (caseId, marks) => {
     const id = parsePositiveInt(caseId);
     if (!id) {
-      return fail("INVALID_ARGUMENT", "caseId must be a positive integer.");
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
     }
     if (!Array.isArray(marks)) {
-      return fail("INVALID_ARGUMENT", "marks must be an array.");
+      return fail("INVALID_ARGUMENT", "marks должен быть массивом.");
     }
     if (marks.length > MAX_MARKS) {
-      return fail("INVALID_ARGUMENT", "marks list is too large.");
+      return fail("INVALID_ARGUMENT", "Список меток слишком большой.");
     }
 
     const normalizedMarks = [];
@@ -606,14 +640,14 @@ ipcMain.handle(
       if (!isPlainObject(mark)) {
         return fail(
           "INVALID_ARGUMENT",
-          `marks[${index}] must be an object.`
+          `marks[${index}] должен быть объектом.`
         );
       }
       const artifactId = parsePositiveInt(mark.artifactId);
       if (!artifactId) {
         return fail(
           "INVALID_ARGUMENT",
-          `marks[${index}].artifactId must be a positive integer.`
+          `marks[${index}].artifactId должен быть положительным целым числом.`
         );
       }
       const labelResult = validateRequiredString(
@@ -654,7 +688,7 @@ ipcMain.handle(
         .prepare("SELECT id FROM cases WHERE id = ?")
         .get(id);
       if (!caseExists) {
-        return fail("NOT_FOUND", "Case not found.");
+        return fail("NOT_FOUND", "Дело не найдено.");
       }
 
       const artifactRows = db
@@ -665,7 +699,7 @@ ipcMain.handle(
         if (!artifactIds.has(mark.artifactId)) {
           return fail(
             "INVALID_ARGUMENT",
-            "marks contain artifacts outside of the case."
+            "marks содержат артефакты вне этого дела."
           );
         }
       }
@@ -695,7 +729,7 @@ ipcMain.handle(
       return ok({ updated: normalizedMarks.length });
     } catch (error) {
       console.error("[DB] updateLegalMarks failed:", error);
-      return fail("DB_ERROR", "Unable to update legal marks.");
+      return fail("DB_ERROR", "Не удалось обновить правовые метки.");
     }
   })
 );
@@ -708,7 +742,7 @@ app
     createMainWindow();
   })
   .catch((error) => {
-    console.error("App failed to initialize:", error);
+    console.error("Не удалось инициализировать приложение:", error);
     app.exit(1);
   });
 
