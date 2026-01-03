@@ -1,170 +1,363 @@
-### Название
+````markdown
+# OSINT Case Center — Developer Guide
 
-**Центр расследований ОСИНТ** — десктоп‑приложение на Electron для расследований в соцсетях и мессенджерах (VK, Одноклассники, Telegram, WhatsApp Web, Max, новостные сайты) без «миллиона вкладок» и с локальным хранением доказательств.[1][2]
+## 1. Project Overview
 
----
+**OSINT Case Center** — это простое настольное приложение на Electron для работы с OSINT-кейсами. Оно позволяет:
 
-### Цели проекта
+- создавать кейсы,
+- просматривать сайты и соцсети во встроенном браузере,
+- сохранять доказательства (скриншоты, HTML, URL),
+- добавлять заметки и теги,
+- выгружать отчёт по кейсу.
 
-- Предоставить одиночному аналитiku единое рабочее место для:
+Все данные **хранятся локально**: SQLite + файловая система.  
+Никаких серверов, аккаунтов и облаков.
 
-  - ведения дел по пользователям и каналам;
-  - анализа соцсетей и локальных новостных сайтов во встроенных вкладках;
-  - фиксации артефактов (скриншоты, HTML, текст, URL, время);
-  - маркировки материалов по признакам возможных составов преступлений;
-  - формирования структурированных отчётов по делам.[3][4][5]
-
-- Все данные хранятся локально, без внешнего сервера и облака:
-  - SQLite‑БД;
-  - скриншоты и HTML‑дампы в файловой системе.[6][7]
+> Это greenfield-проект — **всё пишется с нуля**, шаг за шагом.
 
 ---
 
-### Основные функции
+## 2. Getting Started: Environment Setup
 
-- Создание и ведение дел («кейсов») по людям/каналам.
-- Встроенный браузер с вкладками:
-  - VK, Одноклассники, Telegram Web, WhatsApp Web, Max (X/Twitter), настраиваемые новостные сайты.[8][9][1]
-- Кнопка «Сохранить артефакт»:
-  - скрин видимой области;
-  - сохранение URL, заголовка, времени;
-  - по возможности — HTML и текстовая выдержка.[10][11]
-- База артефактов по делам:
-  - поиск по тексту, URL, типу площадки, меткам.
-- Метки и комментарии:
-  - собственные категории («призывы», «экстремизм», «оправдание», «фейки» и т.п.).[12][3]
-- Экспорт отчётов по делу (HTML/PDF).
+### 2.1. Что нужно установить
 
----
+- Node.js **18 или 20**
+- yarn
+- Git
+- ОС: Windows (основная) или Linux (для разработки)
 
-### Стек
+Проверка:
 
-- Electron (Node.js + Chromium) — кроссплатформенный десктоп (Linux для разработки, Windows как основная целевая платформа).[13][14]
-- SQLite (через `better-sqlite3` или аналог) для локальной БД.[15][16]
-- HTML/CSS/JS или любой фронтенд‑фреймворк по выбору (React/Vue/Svelte и т.д.).
+```bash
+node -v
+yarn -v
+git --version
+```
+````
 
 ---
 
-### Архитектура (высокоуровнево)
+### 2.2. Создание проекта
 
-- **Main‑процесс (Node.js):**
-  - создаёт главное окно (`BrowserWindow`);
-  - управляет БД (SQLite);
-  - управляет файловой системой (сохранение скринов и HTML);
-  - реализует IPC‑ендпоинты для рендерера.[17]
-- **Preload‑скрипт:**
-  - `contextBridge` → безопасный API `window.api.*` для рендерера.[18][19]
-- **Renderer (UI):**
-  - интерфейс дел и артефактов;
-  - панель встроенного браузера (`<webview>`/BrowserView);
-  - кнопка «Сохранить артефакт» → вызов `window.api.captureArtifact(...)`.[20][21]
+```bash
+mkdir osint-case-center
+cd osint-case-center
+npm init -y
+```
 
----
+Установка Electron и БД:
 
-### Структура БД (SQLite)
-
-**Файл:** `osint_case_center.db` (в `app.getPath('userData')`).[22][23]
-
-#### Таблица `cases` (дела)
-
-- `id` INTEGER PK AUTOINCREMENT
-- `title` TEXT — название дела (например, «Иванов Иван, VK + TG»)
-- `description` TEXT
-- `status` TEXT — `draft` / `active` / `closed`
-- `created_at` INTEGER — Unix timestamp
-
-#### Таблица `subjects` (объекты/подозреваемые)
-
-- `id` INTEGER PK
-- `case_id` INTEGER FK → `cases.id`
-- `name` TEXT — ФИО/ник
-- `vk_url` TEXT NULL
-- `ok_url` TEXT NULL
-- `tg_url` TEXT NULL
-- `max_url` TEXT NULL
-- `notes` TEXT
-
-#### Таблица `artifacts` (артефакты)
-
-- `id` INTEGER PK
-- `case_id` INTEGER FK → `cases.id`
-- `subject_id` INTEGER FK → `subjects.id` NULL
-- `source_type` TEXT — `vk` / `ok` / `tg` / `whatsapp` / `max` / `news`
-- `url` TEXT
-- `title` TEXT
-- `captured_at` INTEGER
-- `screenshot_path` TEXT — путь к PNG
-- `html_path` TEXT NULL
-- `text_excerpt` TEXT NULL
-- `tags` TEXT — строка с метками (можно позже вынести в отдельную таблицу)
-
-#### Таблица `legal_marks` (правовые метки)
-
-- `id` INTEGER PK
-- `artifact_id` INTEGER FK → `artifacts.id`
-- `label` TEXT — тип («призывы», «экстремизм», «оправдание», «фейк» и т.д.)[3][12]
-- `article_text` TEXT — произвольное поле с описанием соответствующей статьи/нормы
-- `comment` TEXT
-
-**Индексы:**
-
-- по `artifacts.case_id`, `artifacts.url`, `artifacts.source_type`;
-- по `legal_marks.artifact_id`.
+```bash
+npm install --save-dev electron
+npm install better-sqlite3
+```
 
 ---
 
-### Основной интерфейс
+### 2.3. Минимальный запуск Electron
 
-- **Список дел:**
+#### `main.js`
 
-  - таблица с делами (название, статус, кол‑во артефактов);
-  - кнопка «Создать дело».
+```js
+const { app, BrowserWindow } = require("electron");
 
-- **Экран дела:**
-  - левая колонка: данные дела + объект (`subject`);
-  - центральная зона: встроенный браузер с вкладками (VK, OK, TG, WhatsApp Web, Max, новости);[9][1][8]
-  - над браузером: кнопка «Сохранить артефакт»;
-  - правая колонка: список артефактов по делу, фильтры/поиск, метки.
+app.whenReady().then(() => {
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+  });
 
----
+  win.loadURL("http://localhost:5173");
+});
+```
 
-### Поток фиксации артефакта
+#### `package.json`
 
-1. Аналитик выбирает активное дело.
-2. Встроенный браузер открывает нужную площадку/страницу.
-3. Аналитик нажимает «Сохранить артефакт».
-4. Приложение:
-   - получает `URL` и заголовок страницы через `webview` API;[24][20]
-   - делает скрин видимой области (`capturePage`);[11][10]
-   - по возможности забирает HTML и текст;
-   - сохраняет файлы на диск;
-   - записывает запись в `artifacts`.
+```json
+{
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "electron": "electron ."
+  }
+}
+```
 
----
+Запуск:
 
-### Экспорт отчётов
+```bash
+npm run dev
+npm run electron
+```
 
-- Генерация HTML‑шаблона на основе данных по делу:
-  - общая информация;
-  - артефакты (URL, дата, краткое описание, метки);
-  - твои комментарии.
-- Преобразование HTML в PDF через скрытое окно и `webContents.printToPDF()`.[24]
-
----
-
-### Безопасность
-
-- `contextIsolation: true`, `nodeIntegration: false` в рендерере.[19][18]
-- Все операции с БД и файловой системой происходят только в main‑процессе через IPC.[17]
-- Данные хранятся в `userData`; по желанию можно добавить шифрование БД/файлов (см. подходы к защите SQLite в Electron).[25]
+Если окно открылось — всё работает.
 
 ---
 
-### Сборка и дистрибуция
+## 3. Основные функции
 
-- Использовать `electron-builder` или Electron Forge:
-  - сборка для Windows (`nsis`/`exe`), Linux‑билды — опционально.[26][27][28]
-- Тестирование:
-  - проверка работы БД, путей к скринам, сохранения HTML и отчётов на Windows.[29]
+### Кейсы
+
+- Создать кейс
+- Отредактировать
+- Удалить
+
+### Встроенный браузер
+
+- Открытие сайтов
+- Авторизация в соцсетях
+- Просмотр страниц
+
+### Артефакты
+
+- Скриншот страницы
+- Сохранение HTML
+- URL + дата
+
+### Заметки
+
+- Текстовые комментарии
+- Теги
+
+### Отчёт
+
+- Экспорт кейса в PDF или HTML
 
 ---
+
+## 4. Technology Stack (минимум)
+
+- **Electron** — десктоп
+- **SQLite** — локальная БД
+- **better-sqlite3** — простой доступ к БД
+- **React (опционально)** — UI
+
+Ничего лишнего.
+
+---
+
+## 5. Архитектура (упрощённо)
+
+### Процессы
+
+- **Main**
+
+  - База данных
+  - Файлы
+  - Скриншоты
+
+- **Renderer**
+
+  - Интерфейс
+  - Кнопки, формы
+
+- **Preload**
+
+  - Передаёт команды от UI в Main
+
+Схема:
+
+```
+UI → Preload → Main → Disk
+```
+
+---
+
+## 6. База данных (SQLite)
+
+### Таблица `cases`
+
+```sql
+CREATE TABLE cases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT NOT NULL
+);
+```
+
+### Таблица `artifacts`
+
+```sql
+CREATE TABLE artifacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER,
+  type TEXT,
+  path TEXT,
+  url TEXT,
+  created_at TEXT
+);
+```
+
+Этого достаточно для старта.
+
+---
+
+## 7. Пользовательские сценарии
+
+### Создание кейса
+
+1. Пользователь вводит название
+2. UI вызывает `saveCase`
+3. Запись в SQLite
+4. Создаётся папка кейса
+
+---
+
+### Захват артефакта
+
+1. Пользователь нажимает «Скриншот»
+2. Electron делает screenshot
+3. Файл сохраняется
+4. В БД добавляется запись
+
+---
+
+## 8. IPC API (минимум)
+
+### `saveCase`
+
+**Renderer**
+
+```js
+window.api.saveCase({ title, description });
+```
+
+**Main**
+
+```js
+ipcMain.handle("saveCase", (_, data) => {
+  db.prepare(
+    `
+    INSERT INTO cases (title, description, created_at)
+    VALUES (?, ?, ?)
+  `
+  ).run(data.title, data.description, new Date().toISOString());
+});
+```
+
+---
+
+### `captureArtifact`
+
+- Делает скриншот
+- Возвращает путь к файлу
+
+---
+
+## 9. Безопасность (без фанатизма)
+
+### Включить isolation
+
+```js
+new BrowserWindow({
+  webPreferences: {
+    contextIsolation: true,
+    preload: "preload.js",
+  },
+});
+```
+
+### Preload
+
+```js
+contextBridge.exposeInMainWorld("api", {
+  saveCase: (data) => ipcRenderer.invoke("saveCase", data),
+});
+```
+
+Этого достаточно.
+
+---
+
+## 10. Структура проекта
+
+```
+osint-case-center/
+├─ main/
+│  ├─ main.js
+│  └─ db.js
+├─ preload/
+│  └─ preload.js
+├─ renderer/
+│  └─ src/
+├─ data/
+│  ├─ db.sqlite
+│  └─ cases/
+└─ package.json
+```
+
+---
+
+## 11. Порядок реализации
+
+1. Electron окно
+2. SQLite + db.js
+3. IPC (`saveCase`)
+4. UI кейсов
+5. BrowserView
+6. Скриншоты
+7. Экспорт отчёта
+
+---
+
+## 12. Разработка и сборка
+
+Запуск:
+
+```bash
+npm run dev
+npm run electron
+```
+
+Сборка:
+
+```bash
+npm install --save-dev electron-builder
+npm run build
+```
+
+---
+
+## 13. Частые проблемы
+
+### IPC не работает
+
+- preload не подключён
+- contextIsolation выключен
+
+### Файлы не сохраняются
+
+- неверный путь
+- нет прав на папку
+
+---
+
+## 14. Обработка ошибок (просто)
+
+```js
+try {
+  // действие
+} catch (e) {
+  console.error(e);
+}
+```
+
+Если ошибка — показать сообщение пользователю.
+
+---
+
+## Итог
+
+Это **простое, понятное Electron-приложение**:
+
+- без микросервисов,
+- без лишних абстракций,
+- без overengineering.
+
+Сначала **рабочий продукт**, потом улучшения.
+
+```
+
+```
