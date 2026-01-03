@@ -4,7 +4,11 @@ const quickLinks = [
   { id: "telegram", label: "Telegram", url: "https://web.telegram.org" },
   { id: "whatsapp", label: "WhatsApp", url: "https://web.whatsapp.com" },
   { id: "max", label: "Max", url: "https://web.max.ru/" },
-  { id: "news", label: "Новости", url: "https://news.google.com" },
+  {
+    id: "news",
+    label: "Новости",
+    url: "https://news.google.com/topstories?hl=ru&gl=RU&ceid=RU:ru",
+  },
 ];
 
 const statusLabels = {
@@ -48,6 +52,7 @@ const elements = {
   caseSummary: document.getElementById("caseSummary"),
   caseDetails: document.getElementById("caseDetails"),
   refreshCases: document.getElementById("refreshCases"),
+  createCase: document.getElementById("createCase"),
   clearSelection: document.getElementById("clearSelection"),
   quickNav: document.getElementById("quickNav"),
   browserView: document.getElementById("browserView"),
@@ -56,6 +61,10 @@ const elements = {
   browserError: document.getElementById("browserError"),
   browserErrorMessage: document.getElementById("browserErrorMessage"),
   retryLoad: document.getElementById("retryLoad"),
+  captureArtifact: document.getElementById("captureArtifact"),
+  artifactFeedback: document.getElementById("artifactFeedback"),
+  browserNotice: document.getElementById("browserNotice"),
+  browserNoticeText: document.getElementById("browserNoticeText"),
   tabs: Array.from(document.querySelectorAll(".tab")),
   views: {
     browser: document.getElementById("view-browser"),
@@ -65,6 +74,9 @@ const elements = {
 
 const navButtons = new Map();
 let lastUrl = "https://vk.com";
+let artifactFeedbackTimer = null;
+let browserNoticeTimer = null;
+const MAX_URL_DISPLAY_LENGTH = 140;
 
 function formatDate(value) {
   if (!value) return "Неизвестно";
@@ -216,8 +228,22 @@ function setStatus(text) {
   elements.browserStatus.textContent = text;
 }
 
+function formatUrlForDisplay(url) {
+  if (!url) return "about:blank";
+  const text = String(url);
+  if (text.length <= MAX_URL_DISPLAY_LENGTH) {
+    return text;
+  }
+  return `${text.slice(0, MAX_URL_DISPLAY_LENGTH - 3)}...`;
+}
+
 function setCurrentUrl(url) {
-  elements.currentUrl.textContent = url || "about:blank";
+  const fullUrl = url || "about:blank";
+  elements.currentUrl.textContent = formatUrlForDisplay(fullUrl);
+  elements.currentUrl.title = fullUrl;
+  window.requestAnimationFrame(() => {
+    updateBrowserBounds();
+  });
 }
 
 function showBrowserError(message) {
@@ -229,6 +255,87 @@ function showBrowserError(message) {
 function hideBrowserError() {
   elements.browserError.hidden = true;
   elements.browserErrorMessage.textContent = "";
+}
+
+function showBrowserNotice(message) {
+  if (!elements.browserNotice || !elements.browserNoticeText) {
+    return;
+  }
+  if (browserNoticeTimer) {
+    window.clearTimeout(browserNoticeTimer);
+    browserNoticeTimer = null;
+  }
+  elements.browserNoticeText.textContent = message;
+  elements.browserNotice.hidden = false;
+  browserNoticeTimer = window.setTimeout(() => {
+    hideBrowserNotice();
+  }, 8000);
+}
+
+function hideBrowserNotice() {
+  if (!elements.browserNotice || !elements.browserNoticeText) {
+    return;
+  }
+  if (browserNoticeTimer) {
+    window.clearTimeout(browserNoticeTimer);
+    browserNoticeTimer = null;
+  }
+  elements.browserNoticeText.textContent = "";
+  elements.browserNotice.hidden = true;
+}
+
+function getBrowserNoticeForUrl(url) {
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "accounts.google.com") {
+      return "Вход в Google недоступен во встроенном браузере. Продолжаем без логина.";
+    }
+  } catch (error) {
+    return null;
+  }
+  return null;
+}
+
+function clearArtifactFeedback() {
+  if (!elements.artifactFeedback) {
+    return;
+  }
+  if (artifactFeedbackTimer) {
+    window.clearTimeout(artifactFeedbackTimer);
+    artifactFeedbackTimer = null;
+  }
+  elements.artifactFeedback.hidden = true;
+  elements.artifactFeedback.textContent = "";
+  elements.artifactFeedback.removeAttribute("data-tone");
+}
+
+function setArtifactFeedback(tone, message) {
+  if (!elements.artifactFeedback) {
+    return;
+  }
+  if (artifactFeedbackTimer) {
+    window.clearTimeout(artifactFeedbackTimer);
+    artifactFeedbackTimer = null;
+  }
+  elements.artifactFeedback.textContent = message;
+  elements.artifactFeedback.dataset.tone = tone;
+  elements.artifactFeedback.hidden = false;
+  artifactFeedbackTimer = window.setTimeout(() => {
+    clearArtifactFeedback();
+  }, 6000);
+}
+
+function updateCaptureAvailability(state) {
+  if (!elements.captureArtifact) {
+    return;
+  }
+  const hasCase = Boolean(state.selectedCaseId);
+  const apiReady =
+    window.api && typeof window.api.captureArtifact === "function";
+  elements.captureArtifact.disabled = !hasCase || !apiReady;
 }
 
 function setActiveQuickLink(linkId) {
@@ -356,10 +463,18 @@ function initBrowserBridge() {
       showBrowserError(state.error.message || "Ошибка загрузки.");
     }
 
+    if (state.notice && state.notice.message) {
+      showBrowserNotice(state.notice.message);
+    }
+
     if (state.url !== undefined) {
       lastUrl = state.url || lastUrl;
       setCurrentUrl(state.url);
       syncQuickLinkWithUrl(state.url);
+      const notice = getBrowserNoticeForUrl(state.url);
+      if (notice) {
+        showBrowserNotice(notice);
+      }
     }
   });
 }
@@ -373,6 +488,7 @@ function initBrowserViewport() {
   });
   observer.observe(elements.browserView);
   window.addEventListener("resize", updateBrowserBounds);
+  window.addEventListener("scroll", updateBrowserBounds, { passive: true });
   updateBrowserBounds();
 }
 
@@ -392,6 +508,106 @@ function initTabs() {
       updateBrowserBounds();
     });
   });
+}
+
+async function handleCaptureArtifact() {
+  if (!window.api || typeof window.api.captureArtifact !== "function") {
+    setArtifactFeedback("error", "IPC захвата артефактов недоступен.");
+    return;
+  }
+  const { selectedCaseId } = store.getState();
+  if (!selectedCaseId) {
+    setArtifactFeedback("warning", "Выберите дело перед сохранением.");
+    return;
+  }
+
+  const button = elements.captureArtifact;
+  if (!button || button.disabled) {
+    return;
+  }
+
+  const initialLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "Сохранение...";
+  clearArtifactFeedback();
+
+  try {
+    const result = await window.api.captureArtifact(selectedCaseId, null);
+    if (!result || !result.ok) {
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось сохранить артефакт.";
+      setArtifactFeedback("error", message);
+      return;
+    }
+    const warnings = Array.isArray(result.data && result.data.warnings)
+      ? result.data.warnings
+      : [];
+    if (warnings.length) {
+      setArtifactFeedback(
+        "warning",
+        `Частично сохранено: ${warnings.join(" ")}`
+      );
+    } else {
+      setArtifactFeedback("success", "Артефакт сохранён.");
+    }
+  } catch (error) {
+    console.error("Не удалось сохранить артефакт:", error);
+    setArtifactFeedback("error", "Не удалось сохранить артефакт.");
+  } finally {
+    button.textContent = initialLabel;
+    updateCaptureAvailability(store.getState());
+  }
+}
+
+async function handleCreateCase() {
+  if (!window.api || typeof window.api.createCase !== "function") {
+    window.alert("IPC создания дел недоступен.");
+    return;
+  }
+
+  const titleInput = window.prompt("Название дела", "Новое дело");
+  if (titleInput === null) {
+    return;
+  }
+  const title = titleInput.trim();
+  if (!title) {
+    window.alert("Название дела обязательно.");
+    return;
+  }
+
+  const button = elements.createCase;
+  if (!button || button.disabled) {
+    return;
+  }
+  const initialLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "Создание...";
+
+  try {
+    const result = await window.api.createCase({ title });
+    if (!result || !result.ok) {
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось создать дело.";
+      window.alert(message);
+      return;
+    }
+    const createdCase = result.data;
+    store.setState({
+      selectedCaseId: createdCase.id,
+      selectedCase: createdCase,
+    });
+    await loadCases();
+  } catch (error) {
+    console.error("Не удалось создать дело:", error);
+    window.alert("Не удалось создать дело.");
+  } finally {
+    button.textContent = initialLabel;
+    button.disabled = false;
+  }
 }
 
 async function loadCases() {
@@ -424,6 +640,11 @@ function bindEvents() {
   elements.refreshCases.addEventListener("click", () => {
     loadCases();
   });
+  if (elements.createCase) {
+    elements.createCase.addEventListener("click", () => {
+      handleCreateCase();
+    });
+  }
   elements.clearSelection.addEventListener("click", () => {
     setSelectedCase(null);
   });
@@ -432,7 +653,11 @@ function bindEvents() {
       navigateTo(lastUrl);
     }
   });
-
+  if (elements.captureArtifact) {
+    elements.captureArtifact.addEventListener("click", () => {
+      handleCaptureArtifact();
+    });
+  }
   window.addEventListener("osint:set-case-id", (event) => {
     const caseId = event.detail ? Number(event.detail.caseId) : null;
     setSelectedCaseId(caseId);
@@ -444,6 +669,7 @@ store.subscribe((state) => {
   renderCaseSummary(state);
   renderCaseDetails(state);
   updateBrowserCaseState(state);
+  updateCaptureAvailability(state);
 });
 
 initQuickNav();

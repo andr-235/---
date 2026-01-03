@@ -10,9 +10,13 @@ let browserView = null;
 let browserViewBounds = null;
 let browserTabVisible = true;
 let browserErrorActive = false;
+let lastSafeBrowserUrl = null;
 
-const ARTIFACTS_DIR_NAME = "artifacts";
+const ARTIFACTS_DIR_NAME = "screenshots";
 const CASE_DIR_PREFIX = "case-";
+const AUTH_BLOCKED_HOSTS = new Set(["accounts.google.com"]);
+const DEFAULT_NEWS_URL =
+  "https://news.google.com/topstories?hl=ru&gl=RU&ceid=RU:ru";
 const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 4000;
 const MAX_URL_LENGTH = 2048;
@@ -191,6 +195,10 @@ function sanitizeStoredPath(baseDir, storedPath) {
   return relative.split(path.sep).join("/");
 }
 
+function formatCaptureFolderName(isoString) {
+  return isoString.replace(/[:.]/g, "-");
+}
+
 async function writeArtifactFile({
   baseDir,
   caseDir,
@@ -214,6 +222,24 @@ async function writeArtifactFile({
   const randomSuffix = crypto.randomBytes(6).toString("hex");
   const fileName = `${type}-${Date.now()}-${randomSuffix}.${extension}`;
   const absolutePath = safeJoin(caseDir, fileName);
+  await fs.promises.writeFile(absolutePath, buffer);
+  return path.relative(baseDir, absolutePath).split(path.sep).join("/");
+}
+
+async function writeCaptureFile({
+  baseDir,
+  captureDir,
+  fileName,
+  buffer,
+  maxBytes,
+}) {
+  if (!buffer || buffer.length === 0) {
+    throw new Error("Пустые данные файла.");
+  }
+  if (buffer.length > maxBytes) {
+    throw new Error("Файл слишком большой.");
+  }
+  const absolutePath = path.join(captureDir, fileName);
   await fs.promises.writeFile(absolutePath, buffer);
   return path.relative(baseDir, absolutePath).split(path.sep).join("/");
 }
@@ -274,6 +300,69 @@ function normalizeBrowserUrl(value) {
   } catch (error) {
     return null;
   }
+}
+
+function isAbortError(error) {
+  if (!error) {
+    return false;
+  }
+  if (error.code === "ERR_ABORTED") {
+    return true;
+  }
+  if (error.errno === -3) {
+    return true;
+  }
+  const message = typeof error.message === "string" ? error.message : "";
+  return message.includes("ERR_ABORTED") || message.includes("(-3)");
+}
+
+function isBlockedAuthUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return AUTH_BLOCKED_HOSTS.has(parsed.hostname);
+  } catch (error) {
+    return false;
+  }
+}
+
+function resolveAuthFallbackUrl(value) {
+  const candidates = [];
+  try {
+    const parsed = new URL(value);
+    const continueParam = parsed.searchParams.get("continue");
+    if (continueParam) {
+      candidates.push(continueParam);
+      try {
+        candidates.push(decodeURIComponent(continueParam));
+      } catch (error) {
+        // ignore decode errors
+      }
+    }
+  } catch (error) {
+    // ignore parse errors
+  }
+
+  if (lastSafeBrowserUrl) {
+    candidates.push(lastSafeBrowserUrl);
+  }
+  candidates.push(DEFAULT_NEWS_URL);
+
+  for (const candidate of candidates) {
+    const normalized = normalizeBrowserUrl(candidate);
+    if (normalized && !isBlockedAuthUrl(normalized)) {
+      return normalized;
+    }
+  }
+  return DEFAULT_NEWS_URL;
+}
+
+function notifyAuthBlocked() {
+  sendBrowserState({
+    notice: {
+      message:
+        "Вход в Google недоступен во встроенном браузере. Продолжаем без логина.",
+    },
+  });
 }
 
 function normalizeBrowserBounds(bounds) {
@@ -346,6 +435,10 @@ function createBrowserView() {
   contents.setUserAgent(userAgent, "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7");
   contents.setWindowOpenHandler(({ url }) => {
     const normalized = normalizeBrowserUrl(url);
+    if (normalized && isBlockedAuthUrl(normalized)) {
+      notifyAuthBlocked();
+      return { action: "deny" };
+    }
     if (normalized) {
       contents.loadURL(normalized).catch((error) => {
         console.error("[Browser] window open failed:", error);
@@ -369,12 +462,35 @@ function createBrowserView() {
   });
 
   contents.on("did-navigate", (_event, url) => {
+    if (url && !isBlockedAuthUrl(url)) {
+      lastSafeBrowserUrl = url;
+    }
     sendBrowserState({ url });
   });
 
   contents.on("did-navigate-in-page", (_event, url) => {
+    if (url && !isBlockedAuthUrl(url)) {
+      lastSafeBrowserUrl = url;
+    }
     sendBrowserState({ url });
   });
+
+  const handleBlockedAuth = (event, url) => {
+    if (!isBlockedAuthUrl(url)) {
+      return;
+    }
+    event.preventDefault();
+    notifyAuthBlocked();
+    const fallback = resolveAuthFallbackUrl(url);
+    browserErrorActive = false;
+    updateBrowserViewVisibility();
+    contents.loadURL(fallback).catch((error) => {
+      console.error("[Browser] auth fallback failed:", error);
+    });
+  };
+
+  contents.on("will-navigate", handleBlockedAuth);
+  contents.on("will-redirect", handleBlockedAuth);
 
   contents.on(
     "did-fail-load",
@@ -461,11 +577,22 @@ ipcMain.handle(
       return fail("NOT_READY", "Браузер не готов.");
     }
     try {
+      if (isBlockedAuthUrl(normalized)) {
+        notifyAuthBlocked();
+        const fallback = resolveAuthFallbackUrl(normalized);
+        browserErrorActive = false;
+        updateBrowserViewVisibility();
+        await browserView.webContents.loadURL(fallback);
+        return ok({ url: fallback, blocked: true });
+      }
       browserErrorActive = false;
       updateBrowserViewVisibility();
       await browserView.webContents.loadURL(normalized);
       return ok({ url: normalized });
     } catch (error) {
+      if (isAbortError(error)) {
+        return ok({ url: normalized, aborted: true });
+      }
       console.error("[Browser] loadURL failed:", error);
       browserErrorActive = true;
       updateBrowserViewVisibility();
@@ -812,6 +939,257 @@ ipcMain.handle(
       return ok(mapArtifactRow(row, baseDir));
     } catch (error) {
       console.error("[DB] saveArtifact failed:", error);
+      await cleanupFiles(baseDir, createdFiles);
+      return fail("DB_ERROR", "Не удалось сохранить артефакт.");
+    }
+  })
+);
+
+ipcMain.handle(
+  "artifacts:capture",
+  wrapIpc("artifacts:capture", async (caseId, subjectId) => {
+    const id = parsePositiveInt(caseId);
+    if (!id) {
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
+    }
+
+    let normalizedSubjectId = null;
+    if (subjectId !== undefined && subjectId !== null && subjectId !== "") {
+      normalizedSubjectId = parsePositiveInt(subjectId);
+      if (!normalizedSubjectId) {
+        return fail(
+          "INVALID_ARGUMENT",
+          "subjectId должен быть положительным целым числом."
+        );
+      }
+    }
+
+    let db;
+    try {
+      db = getDb();
+      const caseExists = db
+        .prepare("SELECT id FROM cases WHERE id = ?")
+        .get(id);
+      if (!caseExists) {
+        return fail("NOT_FOUND", "Дело не найдено.");
+      }
+      if (normalizedSubjectId) {
+        const subjectExists = db
+          .prepare(
+            "SELECT id FROM subjects WHERE id = ? AND case_id = ?"
+          )
+          .get(normalizedSubjectId, id);
+        if (!subjectExists) {
+          return fail(
+            "INVALID_ARGUMENT",
+            "subjectId не относится к этому делу."
+          );
+        }
+      }
+    } catch (error) {
+      console.error("[DB] validate case failed:", error);
+      return fail("DB_ERROR", "Не удалось проверить данные дела.");
+    }
+
+    if (!browserView || !browserView.webContents) {
+      return fail("NOT_READY", "Браузер недоступен.");
+    }
+
+    const contents = browserView.webContents;
+    if (contents.isDestroyed()) {
+      return fail("NOT_READY", "Браузер недоступен.");
+    }
+    if (contents.isCrashed && contents.isCrashed()) {
+      return fail("NOT_READY", "Процесс браузера завершился.");
+    }
+
+    const rawUrl = typeof contents.getURL === "function" ? contents.getURL() : "";
+    const urlResult = validateRequiredString(
+      rawUrl,
+      "url",
+      MAX_URL_LENGTH
+    );
+    if (!urlResult.ok) {
+      return fail("INVALID_STATE", "URL страницы недоступен.");
+    }
+
+    const warnings = [];
+    let title = null;
+    const rawTitle =
+      typeof contents.getTitle === "function" ? contents.getTitle() : "";
+    if (typeof rawTitle === "string") {
+      const trimmed = rawTitle.trim();
+      if (trimmed) {
+        if (trimmed.length > MAX_TITLE_LENGTH) {
+          warnings.push("Заголовок страницы был сокращён.");
+          title = trimmed.slice(0, MAX_TITLE_LENGTH);
+        } else {
+          title = trimmed;
+        }
+      }
+    }
+
+    let source = null;
+    try {
+      const parsed = new URL(urlResult.value);
+      if (parsed.hostname) {
+        source = parsed.hostname;
+        if (source.length > MAX_SOURCE_LENGTH) {
+          warnings.push("Источник страницы был сокращён.");
+          source = source.slice(0, MAX_SOURCE_LENGTH);
+        }
+      }
+    } catch (error) {
+      source = null;
+    }
+
+    const capturedAt = new Date().toISOString();
+    const baseDir = getArtifactsBaseDir();
+    const captureDir = safeJoin(
+      baseDir,
+      String(id),
+      formatCaptureFolderName(capturedAt)
+    );
+
+    try {
+      await fs.promises.mkdir(captureDir, { recursive: true });
+    } catch (error) {
+      console.error("[FS] mkdir failed:", error);
+      return fail(
+        "FILE_ERROR",
+        "Не удалось подготовить хранилище артефактов."
+      );
+    }
+
+    const createdFiles = [];
+    let screenshotPath = null;
+    let htmlPath = null;
+    let textPath = null;
+
+    try {
+      const image = await contents.capturePage();
+      const pngBuffer = image.toPNG();
+      screenshotPath = await writeCaptureFile({
+        baseDir,
+        captureDir,
+        fileName: "screenshot.png",
+        buffer: pngBuffer,
+        maxBytes: MAX_SCREENSHOT_BYTES,
+      });
+      createdFiles.push(screenshotPath);
+    } catch (error) {
+      console.error("[Capture] screenshot failed:", error);
+      warnings.push("Не удалось сохранить скриншот.");
+    }
+
+    try {
+      const html = await contents.executeJavaScript(
+        "document.documentElement ? document.documentElement.outerHTML : ''",
+        true
+      );
+      if (typeof html === "string" && html.trim()) {
+        const buffer = Buffer.from(html, "utf8");
+        if (buffer.length > MAX_HTML_BYTES) {
+          warnings.push("HTML слишком большой, сохранение пропущено.");
+        } else {
+          htmlPath = await writeCaptureFile({
+            baseDir,
+            captureDir,
+            fileName: "page.html",
+            buffer,
+            maxBytes: MAX_HTML_BYTES,
+          });
+          createdFiles.push(htmlPath);
+        }
+      } else {
+        warnings.push("HTML страницы недоступен.");
+      }
+    } catch (error) {
+      console.error("[Capture] html failed:", error);
+      warnings.push("Не удалось извлечь HTML страницы.");
+    }
+
+    try {
+      const text = await contents.executeJavaScript(
+        "document.body ? document.body.innerText : ''",
+        true
+      );
+      if (typeof text === "string" && text.trim()) {
+        const buffer = Buffer.from(text, "utf8");
+        if (buffer.length > MAX_TEXT_BYTES) {
+          warnings.push("Текст страницы слишком большой, сохранение пропущено.");
+        } else {
+          textPath = await writeCaptureFile({
+            baseDir,
+            captureDir,
+            fileName: "page.txt",
+            buffer,
+            maxBytes: MAX_TEXT_BYTES,
+          });
+          createdFiles.push(textPath);
+        }
+      } else {
+        warnings.push("Текст страницы недоступен.");
+      }
+    } catch (error) {
+      console.error("[Capture] text failed:", error);
+      warnings.push("Не удалось извлечь текст страницы.");
+    }
+
+    if (!screenshotPath && !htmlPath && !textPath) {
+      await cleanupFiles(baseDir, createdFiles);
+      return fail("CAPTURE_FAILED", "Не удалось сохранить артефакт.");
+    }
+
+    try {
+      const contentHash = crypto
+        .createHash("sha256")
+        .update(urlResult.value)
+        .update(title || "")
+        .update(source || "")
+        .update(capturedAt)
+        .digest("hex");
+
+      const result = db
+        .prepare(
+          `INSERT INTO artifacts (
+             case_id, subject_id, source, url, title, captured_at,
+             screenshot_path, html_path, text_path, content_hash, meta_json
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          id,
+          normalizedSubjectId,
+          source,
+          urlResult.value,
+          title,
+          capturedAt,
+          screenshotPath,
+          htmlPath,
+          textPath,
+          contentHash,
+          null
+        );
+
+      const row = db
+        .prepare(
+          `SELECT id, case_id, subject_id, source, url, title, captured_at,
+                  screenshot_path, html_path, text_path
+           FROM artifacts
+           WHERE id = ?`
+        )
+        .get(result.lastInsertRowid);
+
+      return ok({
+        artifact: mapArtifactRow(row, baseDir),
+        warnings,
+        partial: warnings.length > 0,
+      });
+    } catch (error) {
+      console.error("[DB] captureArtifact failed:", error);
       await cleanupFiles(baseDir, createdFiles);
       return fail("DB_ERROR", "Не удалось сохранить артефакт.");
     }
