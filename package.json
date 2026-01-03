@@ -1,0 +1,15 @@
+{
+  "name": "osint_case_center",
+  "version": "1.0.0",
+  "description": "это простое настольное приложение на Electron для работы с OSINT-кейсами",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "andreyvins2015@yandex.ru",
+  "license": "MIT",
+  "private": false,
+  "devDependencies": {
+    "electron": "^39.2.7"
+  }
+}
