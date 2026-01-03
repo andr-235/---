@@ -4,7 +4,7 @@
   "description": "это простое настольное приложение на Electron для работы с OSINT-кейсами",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "electron . --reload",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
