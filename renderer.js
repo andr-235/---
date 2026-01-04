@@ -1,4 +1,4 @@
-const quickLinks = [
+﻿const quickLinks = [
   { id: "vk", label: "ВК", url: "https://vk.com" },
   { id: "ok", label: "Одноклассники", url: "https://ok.ru" },
   { id: "telegram", label: "Telegram", url: "https://web.telegram.org" },
@@ -104,6 +104,8 @@ const elements = {
   retryLoad: document.getElementById("retryLoad"),
   captureArtifact: document.getElementById("captureArtifact"),
   artifactFeedback: document.getElementById("artifactFeedback"),
+  exportReport: document.getElementById("exportReport"),
+  reportFeedback: document.getElementById("reportFeedback"),
   browserNotice: document.getElementById("browserNotice"),
   browserNoticeText: document.getElementById("browserNoticeText"),
   tabs: Array.from(document.querySelectorAll(".tab")),
@@ -139,6 +141,8 @@ const elements = {
 const navButtons = new Map();
 let lastUrl = "https://vk.com";
 let artifactFeedbackTimer = null;
+let reportFeedbackTimer = null;
+let reportExporting = false;
 let browserNoticeTimer = null;
 let legalSearchValue = "";
 const legalCardRefs = {
@@ -959,10 +963,61 @@ function setArtifactFeedback(tone, message) {
   }, 6000);
 }
 
+function clearReportFeedback() {
+  if (!elements.reportFeedback) {
+    return;
+  }
+  if (reportFeedbackTimer) {
+    window.clearTimeout(reportFeedbackTimer);
+    reportFeedbackTimer = null;
+  }
+  elements.reportFeedback.hidden = true;
+  elements.reportFeedback.textContent = "";
+  elements.reportFeedback.removeAttribute("data-tone");
+}
+
+function setReportFeedback(tone, message) {
+  if (!elements.reportFeedback) {
+    return;
+  }
+  if (reportFeedbackTimer) {
+    window.clearTimeout(reportFeedbackTimer);
+    reportFeedbackTimer = null;
+  }
+  elements.reportFeedback.textContent = message;
+  elements.reportFeedback.dataset.tone = tone;
+  elements.reportFeedback.hidden = false;
+  reportFeedbackTimer = window.setTimeout(() => {
+    clearReportFeedback();
+  }, 8000);
+}
+
+function getReportExportHandler() {
+  if (!window.api) {
+    return null;
+  }
+  if (window.api.export && typeof window.api.export.caseReport === "function") {
+    return window.api.export.caseReport;
+  }
+  if (typeof window.api.exportCaseReport === "function") {
+    return window.api.exportCaseReport;
+  }
+  return null;
+}
+
 function setLegalFeedback(tone, message) {
   store.setState({
     legalFeedback: tone && message ? { tone, message } : null,
   });
+}
+
+function updateReportAvailability(state) {
+  if (!elements.exportReport) {
+    return;
+  }
+  const hasCase = Boolean(state.selectedCaseId);
+  const handler = getReportExportHandler();
+  elements.exportReport.disabled = !hasCase || !handler || reportExporting;
 }
 
 function updateCaptureAvailability(state) {
@@ -1170,6 +1225,62 @@ function initTabs() {
       setActiveView(viewKey);
     });
   });
+}
+
+async function handleExportReport() {
+  const handler = getReportExportHandler();
+  if (!handler) {
+    setReportFeedback("error", "IPC экспорта отчёта недоступен.");
+    return;
+  }
+  const { selectedCaseId } = store.getState();
+  if (!selectedCaseId) {
+    setReportFeedback("warning", "Выберите дело для экспорта отчёта.");
+    return;
+  }
+  if (reportExporting) {
+    return;
+  }
+
+  const button = elements.exportReport;
+  const initialLabel = button ? button.textContent : null;
+  reportExporting = true;
+  clearReportFeedback();
+  updateReportAvailability(store.getState());
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Экспорт...";
+  }
+
+  try {
+    const result = await handler(selectedCaseId, {});
+    if (!result || !result.ok) {
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось экспортировать отчёт.";
+      setReportFeedback("error", message);
+      return;
+    }
+    const pdfPath = result.data && result.data.pdfPath;
+    const htmlPath = result.data && result.data.htmlPath;
+    const message = pdfPath
+      ? `Отчёт сохранён: ${pdfPath}`
+      : htmlPath
+        ? `Отчёт сохранён: ${htmlPath}`
+        : "Отчёт сформирован.";
+    setReportFeedback("success", message);
+  } catch (error) {
+    console.error("Не удалось экспортировать отчёт:", error);
+    setReportFeedback("error", "Не удалось экспортировать отчёт.");
+  } finally {
+    reportExporting = false;
+    if (button) {
+      button.textContent = initialLabel || "Экспорт отчёта";
+      button.disabled = false;
+    }
+    updateReportAvailability(store.getState());
+  }
 }
 
 async function handleCaptureArtifact() {
@@ -1620,6 +1731,11 @@ function bindEvents() {
       handleCaptureArtifact();
     });
   }
+  if (elements.exportReport) {
+    elements.exportReport.addEventListener("click", () => {
+      handleExportReport();
+    });
+  }
   if (elements.caseForm) {
     elements.caseForm.addEventListener("submit", handleCreateCase);
   }
@@ -1726,6 +1842,7 @@ store.subscribe((state) => {
   renderArtifactPreview(state);
   renderNotes(state);
   updateBrowserCaseState(state);
+  updateReportAvailability(state);
   updateCaptureAvailability(state);
 });
 
@@ -1737,3 +1854,5 @@ bindEvents();
 loadLegalMarks();
 loadCases();
 navigateTo(lastUrl, "vk");
+
+

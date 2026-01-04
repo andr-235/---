@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("artifacts:set-legal", artifactId, payload),
   updateLegalMarks: (caseId, marks) =>
     ipcRenderer.invoke("cases:update-legal-marks", caseId, marks),
+  export: {
+    caseReport: (caseId, options) =>
+      ipcRenderer.invoke("export:case-report", caseId, options),
+  },
   browserNavigate: (url) => ipcRenderer.invoke("browser:navigate", url),
   setBrowserBounds: (bounds) => ipcRenderer.send("browser:set-bounds", bounds),
   setBrowserVisible: (visible) =>

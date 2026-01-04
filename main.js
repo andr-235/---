@@ -14,6 +14,7 @@ let lastSafeBrowserUrl = null;
 
 const ARTIFACTS_DIR_NAME = "screenshots";
 const CASE_DIR_PREFIX = "case-";
+const REPORTS_DIR_NAME = "reports";
 const AUTH_BLOCKED_HOSTS = new Set(["accounts.google.com"]);
 const DEFAULT_NEWS_URL =
   "https://news.google.com/topstories?hl=ru&gl=RU&ceid=RU:ru";
@@ -31,6 +32,12 @@ const MAX_HTML_BYTES = 5 * 1024 * 1024;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const ALLOWED_STATUSES = new Set(["open", "closed", "paused", "archived"]);
 const ALLOWED_ENCODINGS = new Set(["utf8", "base64"]);
+const STATUS_LABELS = {
+  open: "Открыто",
+  closed: "Закрыто",
+  paused: "Пауза",
+  archived: "Архив",
+};
 
 function ok(data) {
   return { ok: true, data };
@@ -168,6 +175,12 @@ function normalizeFilePayload(file, defaultEncoding) {
 
 function getArtifactsBaseDir() {
   const baseDir = path.join(app.getPath("userData"), ARTIFACTS_DIR_NAME);
+  fs.mkdirSync(baseDir, { recursive: true });
+  return baseDir;
+}
+
+function getReportsBaseDir() {
+  const baseDir = path.join(app.getPath("userData"), REPORTS_DIR_NAME);
   fs.mkdirSync(baseDir, { recursive: true });
   return baseDir;
 }
@@ -345,6 +358,304 @@ function getStoredFileSize(baseDir, relativePath) {
     return 0;
   }
   return 0;
+}
+
+function formatReportDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("ru-RU");
+}
+
+function formatReportStatus(value) {
+  if (!value) return "—";
+  const normalized = String(value).trim().toLowerCase();
+  return STATUS_LABELS[normalized] || String(value);
+}
+
+function formatReportBytes(value) {
+  if (!value || Number.isNaN(value)) return "—";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
+function escapeHtml(value) {
+  if (value === undefined || value === null) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function mapArtifactReportRow(row, baseDir) {
+  const screenshotPath = sanitizeStoredPath(baseDir, row.screenshot_path);
+  const htmlPath = sanitizeStoredPath(baseDir, row.html_path);
+  const textPath = sanitizeStoredPath(baseDir, row.text_path);
+  const size =
+    getStoredFileSize(baseDir, screenshotPath) +
+    getStoredFileSize(baseDir, htmlPath) +
+    getStoredFileSize(baseDir, textPath);
+  return {
+    id: row.id,
+    source: row.source,
+    url: row.url,
+    title: row.title,
+    capturedAt: row.captured_at,
+    screenshotPath,
+    htmlPath,
+    textPath,
+    size,
+    contentHash: row.content_hash,
+    legalMarkLabel: row.legal_mark_label || null,
+    articleText: row.article_text || null,
+    legalComment: row.legal_comment || row.comment || null,
+  };
+}
+
+function buildCaseReportHtml(caseItem, artifacts, generatedAt) {
+  const titleValue = caseItem.title || `Дело #${caseItem.id}`;
+  const assignedValue = caseItem.assignedTo
+    ? escapeHtml(caseItem.assignedTo)
+    : "—";
+  const descriptionValue = caseItem.description
+    ? escapeHtml(caseItem.description).replace(/\n/g, "<br>")
+    : '<span class="muted">Нет описания.</span>';
+  const createdAtValue = formatReportDateTime(caseItem.createdAt);
+  const updatedAtValue = formatReportDateTime(caseItem.updatedAt);
+  const statusLabel = formatReportStatus(caseItem.status);
+  const generatedAtValue = formatReportDateTime(generatedAt);
+  const legalCount = artifacts.filter(
+    (item) => item.legalMarkLabel || item.articleText || item.legalComment
+  ).length;
+
+  const artifactItems = artifacts.length
+    ? artifacts
+        .map((artifact) => {
+          const artifactTitle = escapeHtml(
+            artifact.title || artifact.url || `Артефакт ${artifact.id}`
+          );
+          const sourceValue = escapeHtml(artifact.source || "—");
+          const capturedValue = formatReportDateTime(artifact.capturedAt);
+          const sizeValue = formatReportBytes(artifact.size);
+          const urlValue = artifact.url ? escapeHtml(artifact.url) : "—";
+          const hashValue = artifact.contentHash
+            ? escapeHtml(artifact.contentHash)
+            : "—";
+          const files = [];
+          if (artifact.screenshotPath) {
+            files.push(`Скриншот: ${artifact.screenshotPath}`);
+          }
+          if (artifact.htmlPath) {
+            files.push(`HTML: ${artifact.htmlPath}`);
+          }
+          if (artifact.textPath) {
+            files.push(`Текст: ${artifact.textPath}`);
+          }
+          const filesValue = files.length
+            ? files.map((item) => escapeHtml(item)).join("<br>")
+            : "—";
+          const legalLabel = artifact.legalMarkLabel
+            ? escapeHtml(artifact.legalMarkLabel)
+            : "—";
+          const articleValue = artifact.articleText
+            ? escapeHtml(artifact.articleText)
+            : "—";
+          const commentValue = artifact.legalComment
+            ? escapeHtml(artifact.legalComment)
+            : "—";
+
+          return `
+        <div class="artifact-item">
+          <div class="artifact-title">${artifactTitle}</div>
+          <div class="artifact-meta">ID: ${artifact.id} · Источник: ${sourceValue} · Дата: ${capturedValue} · Размер: ${sizeValue}</div>
+          <div class="artifact-grid">
+            <div class="artifact-label">URL</div>
+            <div class="artifact-value break-all">${urlValue}</div>
+            <div class="artifact-label">Файлы</div>
+            <div class="artifact-value">${filesValue}</div>
+            <div class="artifact-label">Хэш</div>
+            <div class="artifact-value break-all">${hashValue}</div>
+            <div class="artifact-label">Пометка</div>
+            <div class="artifact-value">${legalLabel}</div>
+            <div class="artifact-label">Статья</div>
+            <div class="artifact-value">${articleValue}</div>
+            <div class="artifact-label">Комментарий</div>
+            <div class="artifact-value">${commentValue}</div>
+          </div>
+        </div>`;
+        })
+        .join("")
+    : '<div class="empty">Артефакты не найдены.</div>';
+
+  return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Отчёт по делу №${caseItem.id}</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: #1f1a14;
+        background: #ffffff;
+      }
+      .page { padding: 24px; }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        border-bottom: 1px solid #e6dfd4;
+        padding-bottom: 16px;
+      }
+      .report-title {
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0;
+      }
+      .report-meta {
+        font-size: 12px;
+        color: #6b6256;
+        margin-top: 6px;
+      }
+      .status-chip {
+        background: #e2efe8;
+        color: #1f6b55;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+      }
+      .section {
+        margin-top: 24px;
+      }
+      .section-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 0 10px 0;
+      }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: 6px 16px;
+        font-size: 13px;
+      }
+      .meta-label {
+        font-size: 11px;
+        color: #6b6256;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+      }
+      .meta-value {
+        font-weight: 600;
+      }
+      .description {
+        margin-top: 10px;
+        font-size: 13px;
+        color: #3d352d;
+        line-height: 1.4;
+      }
+      .summary-row {
+        font-size: 12px;
+        color: #6b6256;
+        margin-top: 8px;
+      }
+      .artifact-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .artifact-item {
+        border: 1px solid #e6dfd4;
+        border-radius: 12px;
+        padding: 12px 14px;
+      }
+      .artifact-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .artifact-meta {
+        font-size: 11px;
+        color: #6b6256;
+        margin-bottom: 10px;
+      }
+      .artifact-grid {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 6px 12px;
+        font-size: 12px;
+      }
+      .artifact-label {
+        font-size: 11px;
+        color: #6b6256;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .artifact-value {
+        color: #1f1a14;
+      }
+      .break-all { word-break: break-all; }
+      .muted { color: #6b6256; }
+      .empty {
+        font-size: 12px;
+        color: #6b6256;
+        border: 1px dashed #e6dfd4;
+        border-radius: 10px;
+        padding: 12px;
+      }
+      @page { margin: 18mm; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div>
+          <h1 class="report-title">Отчёт по делу №${caseItem.id}</h1>
+          <div class="report-meta">Сформирован: ${escapeHtml(generatedAtValue)}</div>
+        </div>
+        <div class="status-chip">${escapeHtml(statusLabel)}</div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">Сводка</h2>
+        <div class="meta-grid">
+          <div class="meta-label">Название</div>
+          <div class="meta-value">${escapeHtml(titleValue)}</div>
+          <div class="meta-label">Статус</div>
+          <div class="meta-value">${escapeHtml(statusLabel)}</div>
+          <div class="meta-label">Ответственный</div>
+          <div class="meta-value">${assignedValue}</div>
+          <div class="meta-label">Создано</div>
+          <div class="meta-value">${escapeHtml(createdAtValue)}</div>
+          <div class="meta-label">Обновлено</div>
+          <div class="meta-value">${escapeHtml(updatedAtValue)}</div>
+        </div>
+        <div class="description">${descriptionValue}</div>
+        <div class="summary-row">Артефактов: ${artifacts.length} · С пометкой: ${legalCount}</div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">Артефакты</h2>
+        <div class="artifact-list">
+          ${artifactItems}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
 }
 
 function normalizeBrowserUrl(value) {
@@ -838,6 +1149,107 @@ ipcMain.handle(
     } catch (error) {
       console.error("[DB] getCaseArtifacts failed:", error);
       return fail("DB_ERROR", "Не удалось загрузить артефакты.");
+    }
+  })
+);
+
+ipcMain.handle(
+  "export:case-report",
+  wrapIpc("export:case-report", async (caseId, options) => {
+    const id = parsePositiveInt(caseId);
+    if (!id) {
+      return fail(
+        "INVALID_ARGUMENT",
+        "caseId должен быть положительным целым числом."
+      );
+    }
+    if (options !== undefined && options !== null && !isPlainObject(options)) {
+      return fail("INVALID_ARGUMENT", "options должны быть объектом.");
+    }
+
+    try {
+      const db = getDb();
+      const caseRow = db
+        .prepare(
+          `SELECT id, title, description, assigned_to, status, created_at, updated_at
+           FROM cases
+           WHERE id = ?`
+        )
+        .get(id);
+      if (!caseRow) {
+        return fail("NOT_FOUND", "Дело не найдено.");
+      }
+
+      const baseDir = getArtifactsBaseDir();
+      const artifacts = db
+        .prepare(
+          `SELECT a.id,
+                  a.source,
+                  a.url,
+                  a.title,
+                  a.captured_at,
+                  a.screenshot_path,
+                  a.html_path,
+                  a.text_path,
+                  a.content_hash,
+                  alm.legal_mark_id,
+                  alm.article_text,
+                  alm.comment AS legal_comment,
+                  lm.label AS legal_mark_label
+           FROM artifacts AS a
+           LEFT JOIN artifact_legal_marks AS alm ON alm.artifact_id = a.id
+           LEFT JOIN legal_marks AS lm ON lm.id = alm.legal_mark_id
+           WHERE a.case_id = ?
+           ORDER BY a.captured_at DESC, a.id DESC`
+        )
+        .all(id)
+        .map((row) => mapArtifactReportRow(row, baseDir));
+
+      const caseItem = mapCaseRow(caseRow);
+      const reportHtml = buildCaseReportHtml(
+        caseItem,
+        artifacts,
+        new Date().toISOString()
+      );
+
+      const reportsBaseDir = getReportsBaseDir();
+      const caseDir = safeJoin(reportsBaseDir, `${CASE_DIR_PREFIX}${id}`);
+      await fs.promises.mkdir(caseDir, { recursive: true });
+
+      const timestamp = formatCaptureFolderName(new Date().toISOString());
+      const baseName = `case-report-${id}-${timestamp}`;
+      const htmlPath = safeJoin(caseDir, `${baseName}.html`);
+      const pdfPath = safeJoin(caseDir, `${baseName}.pdf`);
+
+      await fs.promises.writeFile(htmlPath, reportHtml, "utf8");
+
+      let reportWindow = null;
+      try {
+        reportWindow = new BrowserWindow({
+          show: false,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        });
+        await reportWindow.loadFile(htmlPath);
+        const pdfBuffer = await reportWindow.webContents.printToPDF({
+          printBackground: true,
+          pageSize: "A4",
+          marginsType: 1,
+        });
+        await fs.promises.writeFile(pdfPath, pdfBuffer);
+      } finally {
+        if (reportWindow && !reportWindow.isDestroyed()) {
+          reportWindow.destroy();
+        }
+      }
+
+      return ok({ pdfPath, htmlPath });
+    } catch (error) {
+      console.error("[Export] case report failed:", error);
+      return fail("EXPORT_FAILED", "Не удалось сформировать отчёт.");
     }
   })
 );

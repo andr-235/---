@@ -461,6 +461,26 @@ body {
   gap: 12px;
 }
 
+.case-panel__header--with-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel-header__content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .panel-title {
   font-size: 16px;
   font-weight: 600;

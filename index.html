@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
@@ -243,14 +243,22 @@
         </section>
         <section class="view" id="view-case">
           <div class="case-panel">
-            <div class="case-panel__header">
-            <div class="panel-title">Обзор дела</div>
-            <div class="panel-subtitle">
-              Состояние синхронизируется между вкладками.
+            <div class="case-panel__header case-panel__header--with-actions">
+              <div class="panel-header__content">
+                <div class="panel-title">Обзор дела</div>
+                <div class="panel-subtitle">
+                  Состояние синхронизируется между вкладками.
+                </div>
+              </div>
+              <div class="panel-header__actions">
+                <button class="primary-btn" id="exportReport" type="button">
+                  Экспорт отчёта
+                </button>
+              </div>
             </div>
+            <div class="artifact-feedback" id="reportFeedback" hidden></div>
+            <div class="case-panel__body" id="caseDetails"></div>
           </div>
-          <div class="case-panel__body" id="caseDetails"></div>
-        </div>
           <div class="case-panel">
             <div class="case-panel__header">
               <div class="panel-title">Артефакты</div>
@@ -330,3 +338,4 @@
     <script src="./renderer.js"></script>
   </body>
 </html>
+
