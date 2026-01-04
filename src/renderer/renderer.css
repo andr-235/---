@@ -1,3 +1,43 @@
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  src:
+    local("JetBrains Mono Regular"),
+    url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  src:
+    local("JetBrains Mono Medium"),
+    url("./fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  src:
+    local("JetBrains Mono SemiBold"),
+    url("./fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  src:
+    local("JetBrains Mono Bold"),
+    url("./fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --bg: #f3efe7;
@@ -29,8 +69,11 @@ body {
   margin: 0;
   height: 100vh;
   overflow: hidden;
-  font-family: "Segoe UI Variable Text", "Segoe UI", "Bahnschrift", "Noto Sans",
-    "DejaVu Sans", sans-serif;
+  font-family: "JetBrains Mono", "Segoe UI Variable Text", "Segoe UI", "Bahnschrift",
+    "Noto Sans", "DejaVu Sans", sans-serif;
+  font-variant-ligatures: contextual common-ligatures discretionary historical;
+  font-feature-settings: "liga" 1, "calt" 1, "clig" 1, "dlig" 1;
+  text-rendering: optimizeLegibility;
   color: var(--text);
   background:
     radial-gradient(circle at top left, #f8f1df, transparent 52%),
