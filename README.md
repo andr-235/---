@@ -57,7 +57,7 @@ npm install better-sqlite3
 
 ### 2.3. Минимальный запуск Electron
 
-#### `main.js`
+#### `src/main/index.js`
 
 ```js
 const { app, BrowserWindow } = require("electron");
@@ -76,7 +76,7 @@ app.whenReady().then(() => {
 
 ```json
 {
-  "main": "main.js",
+  "main": "src/main/index.js",
   "scripts": {
     "dev": "vite",
     "electron": "electron ."
@@ -254,7 +254,7 @@ ipcMain.handle("saveCase", (_, data) => {
 new BrowserWindow({
   webPreferences: {
     contextIsolation: true,
-    preload: "preload.js",
+    preload: "src/preload/index.js",
   },
 });
 ```
@@ -275,16 +275,24 @@ contextBridge.exposeInMainWorld("api", {
 
 ```
 osint-case-center/
-├─ main/
-│  ├─ main.js
-│  └─ db.js
-├─ preload/
-│  └─ preload.js
-├─ renderer/
-│  └─ src/
-├─ data/
-│  ├─ db.sqlite
-│  └─ cases/
+├─ src/
+│  ├─ main/
+│  │  ├─ index.js
+│  │  ├─ app.js
+│  │  ├─ controllers/
+│  │  ├─ services/
+│  │  └─ utils/
+│  ├─ db/
+│  │  ├─ index.js
+│  │  └─ repositories/
+│  ├─ preload/
+│  │  └─ index.js
+│  └─ renderer/
+│     ├─ index.html
+│     ├─ renderer.css
+│     └─ index.js
+├─ db/
+│  └─ osint.sqlite
 └─ package.json
 ```
 
@@ -293,7 +301,7 @@ osint-case-center/
 ## 11. Порядок реализации
 
 1. Electron окно
-2. SQLite + db.js
+2. SQLite + src/db/index.js
 3. IPC (`saveCase`)
 4. Интерфейс кейсов
 5. BrowserView

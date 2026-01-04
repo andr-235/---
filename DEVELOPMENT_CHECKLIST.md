@@ -2,7 +2,7 @@
 
 - [+] Установить Node.js на Linux.
 - [+] Создать проект (`npm init`, добавить Electron или использовать шаблон/Forge).
-- [+] Настроить `main.js` (главное окно, включить `preload`).
+- [+] Настроить `src/main/index.js` (главное окно, включить `preload`).
 
 ### Шаг 2. Подключение SQLite
 
@@ -14,9 +14,9 @@
 
 ### Шаг 3. IPC и API
 
-- [+] В `preload.js` реализовать `window.api` с методами:
+- [+] В `src/preload/index.js` реализовать `window.api` с методами:
   - `getCases`, `createCase`, `getCaseArtifacts`, `saveArtifact`, `updateLegalMarks` и т.п.
-- [+] В `main.js` реализовать `ipcMain.handle(...)`:
+- [+] В `src/main/index.js` реализовать `ipcMain.handle(...)`:
   - каждый метод обращается к SQLite и/или файловой системе.
 
 ### Шаг 4. Встроенный браузер
