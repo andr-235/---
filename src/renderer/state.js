@@ -13,6 +13,22 @@ export function buildLegalFormFromArtifact(artifact) {
   };
 }
 
+export function createEmptySettingsForm() {
+  return { id: null, label: "", articleText: "", expectedUpdatedAt: null };
+}
+
+export function buildSettingsFormFromItem(item) {
+  if (!item) {
+    return createEmptySettingsForm();
+  }
+  return {
+    id: item.id,
+    label: item.label || "",
+    articleText: item.articleText || "",
+    expectedUpdatedAt: item.updatedAt || null,
+  };
+}
+
 function createStore(initialState) {
   let state = { ...initialState };
   const listeners = new Set();
@@ -62,6 +78,18 @@ export const store = createStore({
     sortBy: "createdAt",
     sortDir: "desc",
   },
+  settingsItems: [],
+  settingsSearch: "",
+  settingsSelectedId: null,
+  settingsMode: "view",
+  settingsForm: createEmptySettingsForm(),
+  settingsOriginal: createEmptySettingsForm(),
+  settingsHistory: [],
+  settingsAccess: { canEdit: false, currentUser: null },
+  settingsFeedback: null,
+  settingsSaving: false,
+  settingsLoading: false,
+  settingsPending: false,
 });
 
 export function updateCaseFilters(patch) {
@@ -72,6 +100,10 @@ export function updateCaseFilters(patch) {
 export function updateArtifactFilters(patch) {
   const current = store.getState().artifactFilters;
   store.setState({ artifactFilters: { ...current, ...patch } });
+}
+
+export function updateSettingsSearch(value) {
+  store.setState({ settingsSearch: value });
 }
 
 export function getEmptyCaseSelectionState() {

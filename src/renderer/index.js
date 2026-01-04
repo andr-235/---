@@ -1,13 +1,21 @@
-﻿import { quickLinks, DEFAULT_URL, FEEDBACK_TIMEOUTS } from "./constants.js";
+﻿import {
+  quickLinks,
+  DEFAULT_URL,
+  FEEDBACK_TIMEOUTS,
+  MAX_ARTICLE_TEXT_LENGTH,
+} from "./constants.js";
 import { elements } from "./elements.js";
 import {
   store,
   createEmptyLegalForm,
   buildLegalFormFromArtifact,
+  createEmptySettingsForm,
+  buildSettingsFormFromItem,
   getEmptyCaseSelectionState,
   getEmptyArtifactState,
   updateCaseFilters,
   updateArtifactFilters,
+  updateSettingsSearch,
 } from "./state.js";
 import {
   normalizeId,
@@ -25,12 +33,45 @@ import {
   renderArtifactTable,
   renderArtifactPreview,
   renderNotes,
+  renderSettingsList,
+  renderSettingsEditor,
 } from "./renderers.js";
 import { getLegalFormValues } from "./legal-card.js";
 
 const navButtons = new Map();
 let lastUrl = DEFAULT_URL;
 let reportExporting = false;
+
+const ARTICLE_TEXT_REGEX = /^Статья\s+\d+(?:\.\d+)*\s+[^,\n;]+$/iu;
+
+function validateArticleTextInput(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) {
+    return { ok: false, message: "Поле article_text обязательно для заполнения." };
+  }
+  if (text.length > MAX_ARTICLE_TEXT_LENGTH) {
+    return {
+      ok: false,
+      message: `article_text превышает ${MAX_ARTICLE_TEXT_LENGTH} символов.`,
+    };
+  }
+  const parts = text
+    .split(/[\n,;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) {
+    return { ok: false, message: "Поле article_text обязательно для заполнения." };
+  }
+  const invalid = parts.find((part) => !ARTICLE_TEXT_REGEX.test(part));
+  if (invalid) {
+    return {
+      ok: false,
+      message:
+        'Неверный формат article_text. Пример: "Статья 12.3 КоАП РФ, Статья 34 УК РФ".',
+    };
+  }
+  return { ok: true, value: text };
+}
 
 const artifactFeedback = createTimedFeedback(
   elements.artifactFeedback,
@@ -39,6 +80,10 @@ const artifactFeedback = createTimedFeedback(
 const reportFeedback = createTimedFeedback(
   elements.reportFeedback,
   FEEDBACK_TIMEOUTS.report
+);
+const settingsFeedback = createTimedFeedback(
+  elements.settingsFeedback,
+  FEEDBACK_TIMEOUTS.settings
 );
 const browserNotice = createTimedNotice(
   elements.browserNotice,
@@ -183,6 +228,14 @@ function setLegalFeedback(tone, message) {
   store.setState({
     legalFeedback: tone && message ? { tone, message } : null,
   });
+}
+
+function clearSettingsFeedback() {
+  settingsFeedback.clear();
+}
+
+function setSettingsFeedback(tone, message) {
+  settingsFeedback.set(tone, message);
 }
 
 function updateReportAvailability(state) {
@@ -775,11 +828,12 @@ async function handleLegalFormSubmit(button) {
     setLegalFeedback("error", "Выберите метку нарушения из списка.");
     return;
   }
-  const articleText = (articleValue || "").trim();
-  if (!articleText) {
-    setLegalFeedback("error", "Поле article_text обязательно для заполнения.");
+  const articleResult = validateArticleTextInput(articleValue);
+  if (!articleResult.ok) {
+    setLegalFeedback("error", articleResult.message);
     return;
   }
+  const articleText = articleResult.value;
   const commentText = (commentValue || "").trim();
 
   const initialLabel = button ? button.textContent : null;
@@ -951,6 +1005,433 @@ function bindArtifactFilters() {
   }
 }
 
+function getSettingsApi() {
+  return window.api && window.api.settings ? window.api.settings : null;
+}
+
+function applySettingsFormInput(patch) {
+  const current = store.getState().settingsForm || createEmptySettingsForm();
+  store.setState({ settingsForm: { ...current, ...patch } });
+}
+
+function setSelectedSetting(settingItem) {
+  if (!settingItem) {
+    store.setState({
+      settingsSelectedId: null,
+      settingsMode: "view",
+      settingsForm: createEmptySettingsForm(),
+      settingsOriginal: createEmptySettingsForm(),
+      settingsHistory: [],
+      settingsPending: false,
+    });
+    return;
+  }
+  const form = buildSettingsFormFromItem(settingItem);
+  store.setState({
+    settingsSelectedId: settingItem.id,
+    settingsMode: "view",
+    settingsForm: form,
+    settingsOriginal: form,
+    settingsHistory: [],
+    settingsPending: false,
+  });
+  clearSettingsFeedback();
+  loadSettingsHistory(settingItem.id);
+}
+
+function setSelectedSettingId(settingId) {
+  const id = normalizeId(settingId);
+  if (!id) {
+    setSelectedSetting(null);
+    return;
+  }
+  const found =
+    store.getState().settingsItems.find((item) => item.id === id) || null;
+  setSelectedSetting(found);
+}
+
+function startCreateSetting() {
+  store.setState({
+    settingsSelectedId: null,
+    settingsMode: "create",
+    settingsForm: createEmptySettingsForm(),
+    settingsOriginal: createEmptySettingsForm(),
+    settingsHistory: [],
+    settingsPending: false,
+  });
+  clearSettingsFeedback();
+}
+
+function resetSettingsForm() {
+  const state = store.getState();
+  if (state.settingsMode === "create") {
+    store.setState({
+      settingsForm: createEmptySettingsForm(),
+      settingsPending: false,
+    });
+  } else {
+    store.setState({
+      settingsForm: { ...state.settingsOriginal },
+      settingsPending: false,
+    });
+  }
+  clearSettingsFeedback();
+}
+
+async function loadSettings() {
+  const api = getSettingsApi();
+  if (!api || typeof api.list !== "function") {
+    store.setState({
+      settingsItems: [],
+      settingsAccess: { canEdit: false, currentUser: null },
+    });
+    return;
+  }
+  store.setState({ settingsLoading: true });
+  try {
+    const result = await api.list();
+    if (!result || !result.ok) {
+      store.setState({ settingsItems: [], settingsLoading: false });
+      setSettingsFeedback("error", "Не удалось загрузить настройки.");
+      return;
+    }
+    const items = Array.isArray(result.data && result.data.items)
+      ? result.data.items
+      : [];
+    const access =
+      result.data && result.data.access
+        ? result.data.access
+        : { canEdit: false, currentUser: null };
+    const state = store.getState();
+    const selectedId = state.settingsSelectedId;
+    const selectedExists = selectedId
+      ? items.some((item) => item.id === selectedId)
+      : false;
+    const canEdit = Boolean(access && access.canEdit);
+    let selectedItem = selectedExists
+      ? items.find((item) => item.id === selectedId) || null
+      : null;
+    const patch = {
+      settingsItems: items,
+      settingsAccess: access,
+      settingsLoading: false,
+    };
+    if (items.length === 0) {
+      if (canEdit && state.settingsMode !== "create") {
+        patch.settingsSelectedId = null;
+        patch.settingsMode = "create";
+        patch.settingsForm = createEmptySettingsForm();
+        patch.settingsOriginal = createEmptySettingsForm();
+        patch.settingsHistory = [];
+        patch.settingsPending = false;
+      } else if (!selectedExists && state.settingsMode !== "create") {
+        patch.settingsSelectedId = null;
+        patch.settingsForm = createEmptySettingsForm();
+        patch.settingsOriginal = createEmptySettingsForm();
+        patch.settingsHistory = [];
+        patch.settingsPending = false;
+      }
+    } else if (!selectedExists && state.settingsMode !== "create") {
+      const fallback = items[0];
+      const nextForm = buildSettingsFormFromItem(fallback);
+      patch.settingsSelectedId = fallback.id;
+      patch.settingsForm = nextForm;
+      patch.settingsOriginal = nextForm;
+      patch.settingsHistory = [];
+      patch.settingsPending = false;
+      selectedItem = fallback;
+    }
+    if (
+      selectedItem &&
+      state.settingsMode === "view" &&
+      !state.settingsSaving &&
+      !state.settingsPending
+    ) {
+      const nextForm = buildSettingsFormFromItem(selectedItem);
+      patch.settingsSelectedId = selectedItem.id;
+      patch.settingsForm = nextForm;
+      patch.settingsOriginal = nextForm;
+    }
+    store.setState(patch);
+    const nextMode =
+      typeof patch.settingsMode === "string" ? patch.settingsMode : state.settingsMode;
+    const nextSelectedId =
+      typeof patch.settingsSelectedId !== "undefined"
+        ? patch.settingsSelectedId
+        : selectedId;
+    if (nextMode === "view" && nextSelectedId) {
+      loadSettingsHistory(nextSelectedId);
+    }
+  } catch (error) {
+    console.error("Не удалось загрузить настройки:", error);
+    store.setState({ settingsLoading: false });
+    setSettingsFeedback("error", "Не удалось загрузить настройки.");
+  }
+}
+
+async function loadSettingsHistory(settingId) {
+  const api = getSettingsApi();
+  if (!api || typeof api.history !== "function") {
+    store.setState({ settingsHistory: [] });
+    return;
+  }
+  const id = normalizeId(settingId);
+  if (!id) {
+    store.setState({ settingsHistory: [] });
+    return;
+  }
+  try {
+    const result = await api.history(id, 20);
+    if (!result || !result.ok) {
+      store.setState({ settingsHistory: [] });
+      return;
+    }
+    const history = Array.isArray(result.data) ? result.data : [];
+    store.setState({ settingsHistory: history });
+  } catch (error) {
+    console.error("Не удалось загрузить историю настроек:", error);
+    store.setState({ settingsHistory: [] });
+    setSettingsFeedback("error", "Не удалось загрузить историю настроек.");
+  }
+}
+
+async function handleSettingsSave(event) {
+  if (event) {
+    event.preventDefault();
+  }
+  const api = getSettingsApi();
+  if (!api || typeof api.update !== "function" || typeof api.create !== "function") {
+    setSettingsFeedback("error", "IPC настроек недоступен.");
+    return;
+  }
+  const state = store.getState();
+  if (!state.settingsAccess || !state.settingsAccess.canEdit) {
+    setSettingsFeedback("error", "Недостаточно прав для изменения настроек.");
+    return;
+  }
+  if (state.settingsSaving) {
+    return;
+  }
+
+  const form = state.settingsForm || createEmptySettingsForm();
+  const label = (form.label || "").trim();
+  const articleResult = validateArticleTextInput(form.articleText);
+  if (!articleResult.ok) {
+    setSettingsFeedback("error", articleResult.message);
+    return;
+  }
+
+  if (state.settingsMode === "create") {
+    if (!label) {
+      setSettingsFeedback("warning", "Название метки обязательно.");
+      return;
+    }
+  } else if (!state.settingsSelectedId) {
+    setSettingsFeedback("warning", "Выберите метку для редактирования.");
+    return;
+  }
+
+  store.setState({ settingsSaving: true, settingsPending: false });
+  clearSettingsFeedback();
+
+  try {
+    if (state.settingsMode === "create") {
+      const result = await api.create({
+        label,
+        articleText: articleResult.value,
+      });
+      if (!result || !result.ok) {
+        const message =
+          result && result.error && result.error.message
+            ? result.error.message
+            : "Не удалось создать метку.";
+        setSettingsFeedback("error", message);
+        return;
+      }
+      if (result.data && result.data.pending) {
+        store.setState({
+          settingsPending: true,
+          settingsForm: { ...form, label, articleText: articleResult.value },
+        });
+        const pendingPath = result.data.pendingPath;
+        const pendingMessage = pendingPath
+          ? `Изменения сохранены локально: ${pendingPath}`
+          : "Изменения сохранены локально из-за ошибки базы данных.";
+        setSettingsFeedback("warning", pendingMessage);
+        return;
+      }
+      const item = result.data && result.data.item ? result.data.item : null;
+      if (item) {
+        const items = [...state.settingsItems, item].sort((a, b) =>
+          (a.label || "").localeCompare(b.label || "")
+        );
+        const nextForm = buildSettingsFormFromItem(item);
+        store.setState({
+          settingsItems: items,
+          settingsSelectedId: item.id,
+          settingsMode: "view",
+          settingsForm: nextForm,
+          settingsOriginal: nextForm,
+          settingsHistory: [],
+          settingsPending: false,
+        });
+        loadSettingsHistory(item.id);
+        loadLegalMarks();
+      }
+      setSettingsFeedback("success", "Метка создана.");
+      return;
+    }
+
+    const expectedUpdatedAt = form.expectedUpdatedAt || null;
+    const result = await api.update(state.settingsSelectedId, {
+      articleText: articleResult.value,
+      expectedUpdatedAt,
+    });
+    if (!result || !result.ok) {
+      const code = result && result.error && result.error.code;
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось сохранить настройки.";
+      setSettingsFeedback("error", message);
+      if (code === "CONFLICT") {
+        loadSettings();
+      }
+      return;
+    }
+    if (result.data && result.data.pending) {
+      store.setState({
+        settingsPending: true,
+        settingsForm: { ...form, articleText: articleResult.value },
+      });
+      const pendingPath = result.data.pendingPath;
+      const pendingMessage = pendingPath
+        ? `Изменения сохранены локально: ${pendingPath}`
+        : "Изменения сохранены локально из-за ошибки базы данных.";
+      setSettingsFeedback("warning", pendingMessage);
+      return;
+    }
+    const item = result.data && result.data.item ? result.data.item : null;
+    if (item) {
+      const items = state.settingsItems.map((entry) =>
+        entry.id === item.id ? item : entry
+      );
+      const nextForm = buildSettingsFormFromItem(item);
+      store.setState({
+        settingsItems: items,
+        settingsSelectedId: item.id,
+        settingsMode: "view",
+        settingsForm: nextForm,
+        settingsOriginal: nextForm,
+        settingsPending: false,
+      });
+      loadSettingsHistory(item.id);
+    }
+    setSettingsFeedback("success", "ARTICLE_TEXT сохранен.");
+  } catch (error) {
+    console.error("Не удалось сохранить настройки:", error);
+    setSettingsFeedback("error", "Не удалось сохранить настройки.");
+  } finally {
+    store.setState({ settingsSaving: false });
+  }
+}
+
+async function handleSettingsRollback(historyId) {
+  const api = getSettingsApi();
+  if (!api || typeof api.rollback !== "function") {
+    setSettingsFeedback("error", "IPC отката недоступен.");
+    return;
+  }
+  const state = store.getState();
+  if (!state.settingsAccess || !state.settingsAccess.canEdit) {
+    setSettingsFeedback("error", "Недостаточно прав для отката.");
+    return;
+  }
+  if (!state.settingsSelectedId) {
+    setSettingsFeedback("warning", "Выберите метку для отката.");
+    return;
+  }
+  if (state.settingsSaving) {
+    return;
+  }
+
+  store.setState({ settingsSaving: true, settingsPending: false });
+  clearSettingsFeedback();
+  try {
+    const result = await api.rollback(state.settingsSelectedId, historyId, {
+      expectedUpdatedAt: state.settingsOriginal.expectedUpdatedAt || null,
+    });
+    if (!result || !result.ok) {
+      const code = result && result.error && result.error.code;
+      const message =
+        result && result.error && result.error.message
+          ? result.error.message
+          : "Не удалось откатить изменения.";
+      setSettingsFeedback("error", message);
+      if (code === "CONFLICT") {
+        loadSettings();
+      }
+      return;
+    }
+    const item = result.data && result.data.item ? result.data.item : null;
+    if (item) {
+      const items = state.settingsItems.map((entry) =>
+        entry.id === item.id ? item : entry
+      );
+      const nextForm = buildSettingsFormFromItem(item);
+      store.setState({
+        settingsItems: items,
+        settingsSelectedId: item.id,
+        settingsMode: "view",
+        settingsForm: nextForm,
+        settingsOriginal: nextForm,
+        settingsPending: false,
+      });
+      loadSettingsHistory(item.id);
+    }
+    setSettingsFeedback("success", "Версия восстановлена.");
+  } catch (error) {
+    console.error("Не удалось откатить изменения:", error);
+    setSettingsFeedback("error", "Не удалось откатить изменения.");
+  } finally {
+    store.setState({ settingsSaving: false });
+  }
+}
+
+function bindSettingsActions() {
+  if (elements.settingsSearch) {
+    const scheduleSettingsSearch = createValueScheduler((value) => {
+      updateSettingsSearch(value);
+    });
+    elements.settingsSearch.addEventListener("input", (event) => {
+      scheduleSettingsSearch(event.target.value);
+    });
+  }
+  if (elements.settingsLabel) {
+    elements.settingsLabel.addEventListener("input", (event) => {
+      applySettingsFormInput({ label: event.target.value });
+    });
+  }
+  if (elements.settingsArticleText) {
+    elements.settingsArticleText.addEventListener("input", (event) => {
+      applySettingsFormInput({ articleText: event.target.value });
+    });
+  }
+  if (elements.settingsForm) {
+    elements.settingsForm.addEventListener("submit", handleSettingsSave);
+  }
+  if (elements.settingsReset) {
+    elements.settingsReset.addEventListener("click", () => {
+      resetSettingsForm();
+    });
+  }
+  if (elements.settingsCreate) {
+    elements.settingsCreate.addEventListener("click", () => {
+      startCreateSetting();
+    });
+  }
+}
+
 function bindLayoutActions() {
   if (elements.toggleSidebar) {
     elements.toggleSidebar.addEventListener("click", () => {
@@ -972,6 +1453,7 @@ function bindEvents() {
   bindCaseFormActions();
   bindCaseTableActions();
   bindArtifactFilters();
+  bindSettingsActions();
   bindLayoutActions();
   bindGlobalEvents();
 }
@@ -1004,6 +1486,16 @@ store.subscribe((state) => {
   });
   renderArtifactPreview(state, handleLegalFormSubmit);
   renderNotes(state);
+  renderSettingsList(state, {
+    onSelectSetting: (settingId) => {
+      setSelectedSettingId(settingId);
+    },
+  });
+  renderSettingsEditor(state, {
+    onRollback: (historyId) => {
+      handleSettingsRollback(historyId);
+    },
+  });
   updateBrowserCaseState(state);
   updateReportAvailability(state);
   updateCaptureAvailability(state);
@@ -1016,4 +1508,5 @@ initTabs();
 bindEvents();
 loadLegalMarks();
 loadCases();
+loadSettings();
 navigateTo(lastUrl, "vk");

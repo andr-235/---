@@ -1,4 +1,5 @@
-﻿import { createEmptyLegalForm } from "./state.js";
+import { MAX_ARTICLE_TEXT_LENGTH } from "./constants.js";
+import { createEmptyLegalForm } from "./state.js";
 
 let legalSearchValue = "";
 const legalCardRefs = {
@@ -102,6 +103,7 @@ export function renderLegalCard(state, onSubmit) {
   articleInput.className = "input textarea";
   articleInput.rows = 3;
   articleInput.required = true;
+  articleInput.maxLength = MAX_ARTICLE_TEXT_LENGTH;
   articleInput.placeholder = "Например, Статья 13.15 КоАП РФ...";
   articleInput.value = legalForm.articleText || "";
   articleInput.disabled = !artifact;
@@ -137,6 +139,20 @@ export function renderLegalCard(state, onSubmit) {
   const refreshSubmitState = () => {
     submit.disabled =
       !artifact || !marks.length || state.legalFormSaving || !select.value;
+  };
+
+  const applyArticleText = (markId) => {
+    const targetId = String(markId || "");
+    if (!targetId) {
+      return;
+    }
+    const selected = sortedMarks.find(
+      (mark) => String(mark.id) === targetId
+    );
+    if (!selected || typeof selected.articleText !== "string") {
+      return;
+    }
+    articleInput.value = selected.articleText;
   };
 
   const refreshOptions = (value) => {
@@ -207,6 +223,7 @@ export function renderLegalCard(state, onSubmit) {
   });
 
   select.addEventListener("change", () => {
+    applyArticleText(select.value);
     refreshSubmitState();
   });
 

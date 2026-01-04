@@ -1,4 +1,7 @@
-﻿const { MAX_META_LENGTH, ALLOWED_ENCODINGS } = require("../constants");
+const { MAX_META_LENGTH, ALLOWED_ENCODINGS } = require("../constants");
+
+const ARTICLE_TEXT_PATTERN =
+  /^Статья\s+\d+(?:\.\d+)*\s+[^,\n;]+$/iu;
 
 function isPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
@@ -48,6 +51,30 @@ function validateOptionalString(value, fieldName, maxLength) {
     };
   }
   return { ok: true, value: trimmed };
+}
+
+function validateArticleText(value, fieldName, maxLength) {
+  const base = validateRequiredString(value, fieldName, maxLength);
+  if (!base.ok) {
+    return base;
+  }
+  const parts = base.value
+    .split(/[,\n;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) {
+    return { ok: false, error: `${fieldName} обязательно.` };
+  }
+  const invalid = parts.find((part) => !ARTICLE_TEXT_PATTERN.test(part));
+  if (invalid) {
+    return {
+      ok: false,
+      error:
+        `${fieldName} должно быть в формате ` +
+        '"Статья 12.3 КоАП РФ, Статья 34 УК РФ".',
+    };
+  }
+  return { ok: true, value: base.value };
 }
 
 function normalizeCapturedAt(value) {
@@ -120,6 +147,7 @@ module.exports = {
   parsePositiveInt,
   validateRequiredString,
   validateOptionalString,
+  validateArticleText,
   normalizeCapturedAt,
   normalizeMetaJson,
   normalizeFilePayload,

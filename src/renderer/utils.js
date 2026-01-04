@@ -7,6 +7,14 @@ export function formatDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
+export function formatDateTime(value) {
+  if (!value) return "Неизвестно";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Неизвестно";
+  const iso = date.toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+}
+
 export function formatStatus(value) {
   if (!value) return "Неизвестно";
   const normalized = String(value).trim().toLowerCase();

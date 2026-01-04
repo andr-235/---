@@ -81,6 +81,9 @@
             <button class="tab" data-view="case" type="button">
               Дело
             </button>
+            <button class="tab" data-view="settings" type="button">
+              Настройки
+            </button>
           </div>
         </header>
         <section class="view" id="view-cases">
@@ -333,7 +336,104 @@
           <div class="case-panel__body" id="noteBody"></div>
         </div>
         </section>
-      </main>
+        <section class="view" id="view-settings">
+          <div class="settings-layout">
+            <div class="case-panel">
+              <div class="case-panel__header case-panel__header--with-actions">
+                <div class="panel-header__content">
+                  <div class="panel-title">Настройки юридических меток</div>
+                  <div class="panel-subtitle">
+                    Управляйте ARTICLE_TEXT для справочника меток без прямого доступа к базе.
+                  </div>
+                </div>
+                <div class="panel-header__actions">
+                  <button class="primary-btn" id="settingsCreate" type="button">
+                    Новая метка
+                  </button>
+                </div>
+              </div>
+              <div class="table-filters">
+                <div class="filter-group">
+                  <label class="form-label">Поиск</label>
+                  <input
+                    id="settingsSearch"
+                    class="input"
+                    type="search"
+                    placeholder="Название метки или статья"
+                  />
+                </div>
+              </div>
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Метка</th>
+                      <th>ARTICLE_TEXT</th>
+                      <th>Обновлено</th>
+                      <th>Автор</th>
+                    </tr>
+                  </thead>
+                  <tbody id="settingsTableBody"></tbody>
+                </table>
+                <div class="table-empty" id="settingsTableEmpty" hidden>
+                  Настройки пока не заданы.
+                </div>
+              </div>
+            </div>
+            <div class="case-panel">
+              <div class="case-panel__header">
+                <div class="panel-title">Редактор ARTICLE_TEXT</div>
+                <div class="panel-subtitle">
+                  Формат: "Статья X [кодекс/закон]". Максимум 1000 символов.
+                </div>
+              </div>
+              <div class="artifact-feedback" id="settingsFeedback" hidden></div>
+              <form class="case-form" id="settingsForm">
+                <label class="form-field">
+                  <span class="form-label">Метка *</span>
+                  <input
+                    id="settingsLabel"
+                    class="input"
+                    required
+                    maxlength="200"
+                    placeholder="Например, Оскорбление"
+                  />
+                </label>
+                <label class="form-field">
+                  <span class="form-label">ARTICLE_TEXT *</span>
+                  <textarea
+                    id="settingsArticleText"
+                    class="input textarea"
+                    rows="4"
+                    maxlength="1000"
+                    required
+                    placeholder="Статья 12.3 КоАП РФ"
+                  ></textarea>
+                </label>
+                <div class="legal-card__hint">
+                  Пример: Статья 12.3 КоАП РФ, Статья 34 УК РФ
+                </div>
+                <div class="case-panel__body" id="settingsMeta"></div>
+                <div class="form-actions">
+                  <button class="primary-btn" id="settingsSave" type="submit">
+                    Сохранить
+                  </button>
+                  <button class="outline-btn" id="settingsReset" type="button">
+                    Отменить
+                  </button>
+                </div>
+              </form>
+              <div class="settings-history">
+                <div class="panel-title">История изменений</div>
+                <div class="panel-subtitle">
+                  Откатите ARTICLE_TEXT к предыдущей версии при необходимости.
+                </div>
+                <div class="settings-history__list" id="settingsHistory"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+</main>
     </div>
     <script type="module" src="./index.js"></script>
   </body>

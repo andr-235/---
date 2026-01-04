@@ -6,6 +6,7 @@ const { createBrowserService } = require("./services/browser-service");
 const { createArtifactService } = require("./services/artifact-service");
 const caseService = require("./services/case-service");
 const legalService = require("./services/legal-service");
+const settingsService = require("./services/settings-service");
 const exportService = require("./services/export-service");
 
 const browserService = createBrowserService();
@@ -17,6 +18,7 @@ registerIpcHandlers({
   caseService,
   artifactService,
   legalService,
+  settingsService,
   exportService,
 });
 

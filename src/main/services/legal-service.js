@@ -11,6 +11,7 @@ const {
   parsePositiveInt,
   validateRequiredString,
   validateOptionalString,
+  validateArticleText,
 } = require("../utils/validation");
 const { getArtifactsBaseDir } = require("../utils/files");
 const { mapArtifactRow } = require("../models/artifact-model");
@@ -27,6 +28,7 @@ function listLegalMarks() {
         id: row.id,
         label: row.label,
         description: row.description || null,
+        articleText: row.article_text || "",
       }))
     );
   } catch (error) {
@@ -53,7 +55,7 @@ function setArtifactLegal(artifactId, payload) {
       "legalMarkId обязателен и должен быть положительным целым числом."
     );
   }
-  const articleResult = validateRequiredString(
+  const articleResult = validateArticleText(
     payload.articleText,
     "articleText",
     MAX_LEGAL_TEXT_LENGTH
@@ -145,7 +147,7 @@ function updateCaseLegalMarks(caseId, marks) {
     if (!labelResult.ok) {
       return fail("INVALID_ARGUMENT", labelResult.error);
     }
-    const articleResult = validateRequiredString(
+    const articleResult = validateArticleText(
       mark.articleText,
       `marks[${index}].articleText`,
       MAX_LEGAL_TEXT_LENGTH

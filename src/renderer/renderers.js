@@ -1,6 +1,7 @@
 ﻿import { elements } from "./elements.js";
 import {
   formatDate,
+  formatDateTime,
   formatStatus,
   formatBytes,
   createDetailRow,
@@ -8,7 +9,11 @@ import {
   getArtifactTypeLabel,
   resolveArtifactType,
 } from "./utils.js";
-import { applyCaseFiltersAndSort, applyArtifactFilters } from "./filters.js";
+import {
+  applyCaseFiltersAndSort,
+  applyArtifactFilters,
+  applySettingsFilters,
+} from "./filters.js";
 import { renderLegalCard } from "./legal-card.js";
 
 export function renderCaseList(state, handlers = {}) {
@@ -296,4 +301,166 @@ export function renderNotes(state) {
     fragment.appendChild(createDetailRow(label, value));
   });
   elements.noteBody.appendChild(fragment);
+}
+
+export function renderSettingsList(state, handlers = {}) {
+  if (!elements.settingsTableBody) {
+    return;
+  }
+  const rows = applySettingsFilters(state);
+  elements.settingsTableBody.innerHTML = "";
+  if (!rows.length) {
+    if (elements.settingsTableEmpty) {
+      elements.settingsTableEmpty.hidden = false;
+    }
+    return;
+  }
+  if (elements.settingsTableEmpty) {
+    elements.settingsTableEmpty.hidden = true;
+  }
+  const fragment = document.createDocumentFragment();
+  rows.forEach((item) => {
+    const tr = document.createElement("tr");
+    if (item.id === state.settingsSelectedId) {
+      tr.classList.add("is-active");
+    }
+
+    const labelTd = document.createElement("td");
+    labelTd.textContent = item.label || "-";
+
+    const articleTd = document.createElement("td");
+    const articleText = item.articleText || "";
+    articleTd.textContent =
+      articleText.length > 80 ? `${articleText.slice(0, 77)}...` : articleText;
+
+    const updatedTd = document.createElement("td");
+    updatedTd.textContent = formatDateTime(item.updatedAt || item.createdAt);
+
+    const authorTd = document.createElement("td");
+    authorTd.textContent = item.updatedBy || "-";
+
+    tr.append(labelTd, articleTd, updatedTd, authorTd);
+    tr.addEventListener("click", () => {
+      if (handlers.onSelectSetting) {
+        handlers.onSelectSetting(item.id);
+      }
+    });
+    fragment.appendChild(tr);
+  });
+  elements.settingsTableBody.appendChild(fragment);
+}
+
+export function renderSettingsEditor(state, handlers = {}) {
+  if (!elements.settingsForm || !elements.settingsArticleText) {
+    return;
+  }
+  const form = state.settingsForm || {};
+  const canEdit = Boolean(state.settingsAccess && state.settingsAccess.canEdit);
+  const hasSelection = Boolean(state.settingsSelectedId);
+  const isCreate = state.settingsMode === "create";
+
+  const labelValue = form.label || "";
+  if (elements.settingsLabel) {
+    if (elements.settingsLabel.value !== labelValue) {
+      elements.settingsLabel.value = labelValue;
+    }
+    elements.settingsLabel.disabled = !canEdit || !isCreate;
+  }
+  const articleValue = form.articleText || "";
+  if (elements.settingsArticleText.value !== articleValue) {
+    elements.settingsArticleText.value = articleValue;
+  }
+  elements.settingsArticleText.disabled = !canEdit || (!hasSelection && !isCreate);
+
+  if (elements.settingsSave) {
+    elements.settingsSave.disabled =
+      !canEdit || state.settingsSaving || (!hasSelection && !isCreate);
+  }
+  if (elements.settingsReset) {
+    elements.settingsReset.disabled =
+      !canEdit || state.settingsSaving || (!hasSelection && !isCreate);
+  }
+  if (elements.settingsCreate) {
+    elements.settingsCreate.disabled = !canEdit || state.settingsSaving;
+  }
+
+  if (elements.settingsMeta) {
+    elements.settingsMeta.innerHTML = "";
+    if (hasSelection) {
+      const selected = state.settingsItems.find(
+        (item) => item.id === state.settingsSelectedId
+      );
+      if (selected) {
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(
+          createDetailRow(
+            "Последнее изменение",
+            formatDateTime(selected.updatedAt || selected.createdAt)
+          )
+        );
+        fragment.appendChild(
+          createDetailRow("Автор", selected.updatedBy || "-")
+        );
+        if (state.settingsPending) {
+          fragment.appendChild(
+            createDetailRow("Локальные изменения", "ожидают синхронизации")
+          );
+        }
+        if (state.settingsAccess && state.settingsAccess.currentUser) {
+          fragment.appendChild(
+            createDetailRow("Текущий пользователь", state.settingsAccess.currentUser)
+          );
+        }
+        elements.settingsMeta.appendChild(fragment);
+      }
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "placeholder";
+      empty.textContent = isCreate
+        ? "Введите данные для новой метки."
+        : "Выберите метку для редактирования.";
+      elements.settingsMeta.appendChild(empty);
+    }
+  }
+
+  if (elements.settingsHistory) {
+    elements.settingsHistory.innerHTML = "";
+    const history = Array.isArray(state.settingsHistory)
+      ? state.settingsHistory
+      : [];
+    if (!history.length) {
+      const empty = document.createElement("div");
+      empty.className = "placeholder";
+      empty.textContent = "История изменений пока пуста.";
+      elements.settingsHistory.appendChild(empty);
+    } else {
+      const fragment = document.createDocumentFragment();
+      history.forEach((entry) => {
+        const item = document.createElement("div");
+        item.className = "settings-history__item";
+        const info = document.createElement("div");
+        info.className = "settings-history__info";
+        info.textContent = `${formatDateTime(entry.updatedAt)} · ${entry.updatedBy || "-"}`;
+        const text = document.createElement("div");
+        text.className = "settings-history__text";
+        text.textContent = entry.articleText || "";
+        const actions = document.createElement("div");
+        actions.className = "settings-history__actions";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "tiny-btn";
+        button.textContent = "Откатить";
+        button.disabled = !canEdit || state.settingsSaving;
+        button.addEventListener("click", () => {
+          if (handlers.onRollback) {
+            handlers.onRollback(entry.id);
+          }
+        });
+        actions.appendChild(button);
+        item.append(info, text, actions);
+        fragment.appendChild(item);
+      });
+      elements.settingsHistory.appendChild(fragment);
+    }
+  }
 }

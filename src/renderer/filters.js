@@ -69,3 +69,16 @@ export function applyArtifactFilters(state) {
 
   return filtered;
 }
+
+export function applySettingsFilters(state) {
+  const items = Array.isArray(state.settingsItems) ? state.settingsItems : [];
+  const search = (state.settingsSearch || "").trim().toLowerCase();
+  if (!search) {
+    return items;
+  }
+  return items.filter((item) => {
+    const label = (item.label || "").toLowerCase();
+    const article = (item.articleText || "").toLowerCase();
+    return label.includes(search) || article.includes(search);
+  });
+}

@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("artifacts:set-legal", artifactId, payload),
   updateLegalMarks: (caseId, marks) =>
     ipcRenderer.invoke("cases:update-legal-marks", caseId, marks),
+  settings: {
+    list: () => ipcRenderer.invoke("settings:list"),
+    create: (payload) => ipcRenderer.invoke("settings:create", payload),
+    update: (id, payload) => ipcRenderer.invoke("settings:update", id, payload),
+    history: (id, limit) => ipcRenderer.invoke("settings:history", id, limit),
+    rollback: (id, historyId, payload) =>
+      ipcRenderer.invoke("settings:rollback", id, historyId, payload),
+    access: () => ipcRenderer.invoke("settings:access"),
+  },
   export: {
     caseReport: (caseId, options) =>
       ipcRenderer.invoke("export:case-report", caseId, options),
